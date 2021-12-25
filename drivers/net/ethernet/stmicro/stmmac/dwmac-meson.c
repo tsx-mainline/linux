@@ -5,6 +5,7 @@
  * Copyright (C) 2014 Beniamino Galvani <b.galvani@gmail.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/ethtool.h>
@@ -16,14 +17,23 @@
 
 #include "stmmac_platform.h"
 
-#define PREG_ETHERNET_ADDR0_DIV_EN	BIT(0)
+#define PREG_ETHERNET_ADDR0_DIV_EN			BIT(0)
 
 /* divides the input clock by 20 (= 0x0) or 2 (= 0x1) */
-#define PREG_ETHERNET_ADDR0_SPEED_100	BIT(1)
+#define PREG_ETHERNET_ADDR0_SPEED_100			BIT(1)
+
+/* 0x0 = little, 0x1 = big */
+#define PREG_ETHERNET_ADDR0_DATA_ENDIANNESS		BIT(2)
+
+/* 0x0 = same order, 0x1: unknown */
+#define PREG_ETHERNET_ADDR0_DESC_ENDIANNESS		BIT(3)
+
+#define PREG_ETHERNET_ADDR0_PHY_INTF_SEL		GENMASK(6, 4)
 
 struct meson_dwmac {
 	struct device	*dev;
 	void __iomem	*reg;
+	phy_interface_t	interface;
 };
 
 static int meson6_dwmac_set_clk_tx_rate(void *bsp_priv, struct clk *clk_tx_i,
@@ -51,8 +61,19 @@ static int meson6_dwmac_set_clk_tx_rate(void *bsp_priv, struct clk *clk_tx_i,
 static int meson6_dwmac_init(struct platform_device *pdev, void *priv)
 {
 	struct meson_dwmac *dwmac = priv;
+	u32 val;
 
-	writel(readl(dwmac->reg) | PREG_ETHERNET_ADDR0_DIV_EN, dwmac->reg);
+	/* only RMII is supported (DWMAC phy_intf_sel input: 4 = RMII) */
+	if (dwmac->interface != PHY_INTERFACE_MODE_RMII)
+		return -EINVAL;
+
+	val = readl(dwmac->reg);
+	val &= ~PREG_ETHERNET_ADDR0_PHY_INTF_SEL;
+	val |= FIELD_PREP(PREG_ETHERNET_ADDR0_PHY_INTF_SEL, 4);
+	val &= ~PREG_ETHERNET_ADDR0_DATA_ENDIANNESS;
+	val &= ~PREG_ETHERNET_ADDR0_DESC_ENDIANNESS;
+	val |= PREG_ETHERNET_ADDR0_DIV_EN;
+	writel(val, dwmac->reg);
 
 	return 0;
 }
@@ -92,6 +113,8 @@ static int meson6_dwmac_probe(struct platform_device *pdev)
 						      50 * 1000 * 1000);
 	if (IS_ERR(clk))
 		return PTR_ERR(clk);
+
+	dwmac->interface = plat_dat->phy_interface;
 
 	plat_dat->bsp_priv = dwmac;
 	plat_dat->init = meson6_dwmac_init;
