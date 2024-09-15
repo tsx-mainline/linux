@@ -654,11 +654,6 @@
 		#size-cells = <2>;
 		ranges;
 
-		zap_shader_region: zap@81800000 {
-			compatible = "shared-dma-pool";
-			reg = <0x0 0x81800000 0x0 0x2000>;
-			no-map;
-		};
 
 		qseecom_mem: qseecom@85b00000 {
 			reg = <0x0 0x85b00000 0x0 0x800000>;
@@ -710,6 +705,12 @@
 
 		mba_mem: mba@92000000 {
 			reg = <0x0 0x92000000 0x0 0x100000>;
+			no-map;
+		};
+
+		zap_shader_region: zap@95000000 {
+			compatible = "shared-dma-pool";
+			reg = <0x0 0x95000000 0x0 0x2000>;
 			no-map;
 		};
 
