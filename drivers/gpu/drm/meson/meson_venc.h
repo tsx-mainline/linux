@@ -22,6 +22,7 @@ enum {
 	MESON_VENC_MODE_CVBS_NTSC,
 	MESON_VENC_MODE_HDMI,
 	MESON_VENC_MODE_MIPI_DSI,
+	MESON_VENC_MODE_LVDS,
 };
 
 struct meson_cvbs_enci_mode {
