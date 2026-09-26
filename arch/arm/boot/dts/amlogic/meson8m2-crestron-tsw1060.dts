@@ -256,7 +256,83 @@
 			};
 		};
 	};
+
+	thermal-zones {
+		soc-thermal {
+			/*
+			 * The vendor thermal table (yushan_one_10inch.dtd,
+			 * trip_point) caps the CPU at 1608 MHz from 70 C,
+			 * 1200 MHz from 80 C and 800 MHz from 90 C. Above
+			 * 70 C step_wise may go down to cooling state 1, one
+			 * OPP below the top: 1416 MHz, since 1608 MHz is the
+			 * top OPP. This is kept on purpose. With four cores
+			 * busy for 15 min (case closed) the CPU stays at
+			 * 1416 MHz and 75-77 C; without this trip it runs at
+			 * 1608/1416/1200 MHz and 80-84 C for only 3 % more
+			 * throughput. A realistic kiosk load (dashboard
+			 * reloads, audio, voice) stays below 70 C at 1608 MHz.
+			 * meson8.dtsi's 80 C passive trip (unlimited) and
+			 * 90 C hot trip still apply.
+			 */
+			trips {
+				soc_warm: soc-warm {
+					temperature = <70000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map-warm {
+					trip = <&soc_warm>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT 1>,
+							 <&cpu1 THERMAL_NO_LIMIT 1>,
+							 <&cpu2 THERMAL_NO_LIMIT 1>,
+							 <&cpu3 THERMAL_NO_LIMIT 1>;
+				};
+			};
+		};
+	};
 };
+
+/*
+ * VCCK is DCDC1 of the RN5T618 (see pmic@32). Same pattern as
+ * meson8m2-mxiii.dtsi; all four CPUs name the supply (like
+ * meson8m2-wetek-core.dts) although they share one OPP table and policy.
+ */
+&cpu0 {
+	cpu-supply = <&vcck>;
+};
+
+&cpu1 {
+	cpu-supply = <&vcck>;
+};
+
+&cpu2 {
+	cpu-supply = <&vcck>;
+};
+
+&cpu3 {
+	cpu-supply = <&vcck>;
+};
+
+/*
+ * The top OPP is 1608 MHz. opp-1800000000 and opp-1992000000 (both
+ * disabled in meson8.dtsi) stay off on this board:
+ *
+ * - 1800 MHz / 1125 mV: VCCK follows the OPP and a constant single-core
+ *   load passes, but the kiosk's bursty load panicked the kernel twice
+ *   within a minute (register corruption on CPU3, idle/IRQ-exit path),
+ *   for only +11 % single-core throughput. It was a turbo-mode boost OPP
+ *   here before; removed so userspace cannot turn it on.
+ * - 1992 MHz / 1150 mV (sys_pll M=83): oopsed 8 s into boot (random kernel
+ *   state corruption on CPU3, then a panic). The vendor DVFS table's
+ *   "1992 MHz" is sys_pll 0x4000c247, whose M field is 71 (1704 MHz at
+ *   24 MHz/step) plus undocumented bits 14-15, so the vendor never ran a
+ *   real 1992 MHz either.
+ *
+ * See docs/hardware.md "SoC and CPU" in tsx-xx60-linux.
+ */
 
 /*
  * No CVBS connector on this board. The VPU node references the DAC as its
@@ -287,14 +363,36 @@
 		reg = <0x32>;
 
 		/*
-		 * No "regulators" node on purpose: without init data the
-		 * regulator core registers DCDC1..3, LDO1..5 and LDORTC1/2
-		 * read-only (no voltage, no enable/disable), so every rail stays
-		 * exactly as U-Boot left it. regulator-always-on would switch on
-		 * rails that are off, and leaving it out would let
+		 * Rail map (vendor kernel ricoh_pmu.c convert_id_to_dcdc(),
+		 * U-Boot firmware/power.c rn5t618_power_init(), and the SPL
+		 * log "DC01 v:1100, 0x[36]"): DCDC1 = VCCK (CPU core, 1.1 V at
+		 * boot), DCDC2 = VDDEE/VDDAO (1.15 V), DCDC3 = DDR3L (U-Boot
+		 * sets 1.5 V, then 1.35 V after DDR init).
+		 *
+		 * Only DCDC1 gets constraints, for cpufreq. Every other rail
+		 * has no child node, so the regulator core registers it
+		 * without init data: read-only, no voltage change, no
+		 * enable/disable, exactly as U-Boot left it.
+		 * regulator-always-on on a rail that is off would switch it
+		 * on, and constraints without it would let
 		 * regulator_late_cleanup switch off rails nobody claims.
-		 * Fill in names and constraints once the rail map is known.
 		 */
+		regulators {
+			vcck: DCDC1 {
+				regulator-name = "vcck";
+				regulator-min-microvolt = <825000>;
+				regulator-max-microvolt = <1150000>;
+				/*
+				 * The driver has no ramp data. The vendor
+				 * kernel waits 100 us after each DCDC write
+				 * (steps of 25..75 mV); 0.25 mV/us is at least
+				 * as slow for every step (50 mV -> 200 us).
+				 */
+				regulator-ramp-delay = <250>;
+				regulator-boot-on;
+				regulator-always-on;
+			};
+		};
 	};
 };
 
