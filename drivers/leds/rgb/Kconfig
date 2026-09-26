@@ -2,6 +2,18 @@
 
 if LEDS_CLASS_MULTICOLOR
 
+config LEDS_CRESTRON_STM32
+	tristate "Crestron TSX-xx60 STM32 RGB LED bar"
+	depends on USB
+	help
+	  This option enables support for the RGB LED bar of the Crestron
+	  TSX-xx60 touch panels (TSW-560/760/1060). The bar is driven by an
+	  STM32 microcontroller on an internal USB port (14be:001b); the
+	  driver exposes it as one multicolor LED "tsx:rgb:bar".
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called leds-crestron-stm32.
+
 config LEDS_GROUP_MULTICOLOR
 	tristate "LEDs group multi-color support"
 	depends on OF
