@@ -21,6 +21,7 @@
 #include <linux/interrupt.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
+#include <linux/input/touch-overlay.h>
 #include <linux/input/touchscreen.h>
 #include <linux/irq.h>
 #include <linux/kernel.h>
@@ -109,6 +110,7 @@ struct edt_ft5x06_ts_data {
 	struct i2c_client *client;
 	struct input_dev *input;
 	struct touchscreen_properties prop;
+	struct list_head touch_overlay_list;
 	u16 num_x;
 	u16 num_y;
 	struct regulator *vcc;
@@ -295,11 +297,58 @@ static const struct regmap_config edt_M06_i2c_regmap_config = {
 	.write = edt_M06_i2c_write,
 };
 
+/*
+ * Report one contact through the touch-overlay helpers: contacts on an
+ * overlay button become key events, contacts outside the overlay touchscreen
+ * area are dropped, the rest are reported as usual.
+ */
+static void edt_ft5x06_report_overlay(struct edt_ft5x06_ts_data *tsdata,
+				      int type, int id, int x, int y)
+{
+	struct input_dev *input = tsdata->input;
+	struct input_mt_pos pos;
+
+	if (id >= tsdata->max_support_points)
+		return;
+
+	if (type == TOUCH_EVENT_UP) {
+		/*
+		 * Release the slot without marking it as used in this frame,
+		 * so that touch_overlay_sync_frame() releases a button held by
+		 * this contact. For a button contact the tracking ID is
+		 * already -1 and the event is filtered by the input core.
+		 */
+		input_mt_slot(input, id);
+		input_event(input, EV_ABS, ABS_MT_TRACKING_ID, -1);
+		return;
+	}
+
+	touchscreen_set_mt_pos(&pos, &tsdata->prop, x, y);
+
+	/*
+	 * A contact that started on the touchscreen stays a touchscreen
+	 * contact: sliding off the screen onto a button must not press it.
+	 */
+	if (input_mt_is_active(&input->mt->slots[id])) {
+		if (pos.x > tsdata->prop.max_x || pos.y > tsdata->prop.max_y)
+			return;
+	} else if (touch_overlay_process_contact(&tsdata->touch_overlay_list,
+						 input, &pos, id)) {
+		return;
+	}
+
+	input_mt_slot(input, id);
+	input_mt_report_slot_state(input, MT_TOOL_FINGER, true);
+	input_report_abs(input, ABS_MT_POSITION_X, pos.x);
+	input_report_abs(input, ABS_MT_POSITION_Y, pos.y);
+}
+
 static irqreturn_t edt_ft5x06_ts_isr(int irq, void *dev_id)
 {
 	struct edt_ft5x06_ts_data *tsdata = dev_id;
 	struct device *dev = &tsdata->client->dev;
 	u8 rdbuf[63];
+	bool overlay = !list_empty(&tsdata->touch_overlay_list);
 	int i, type, x, y, id;
 	int error;
 
@@ -334,6 +383,11 @@ static irqreturn_t edt_ft5x06_ts_isr(int irq, void *dev_id)
 		if (id >= tsdata->max_support_points)
 			continue;
 
+		if (overlay) {
+			edt_ft5x06_report_overlay(tsdata, type, id, x, y);
+			continue;
+		}
+
 		input_mt_slot(tsdata->input, id);
 		if (input_mt_report_slot_state(tsdata->input, MT_TOOL_FINGER,
 					       type != TOUCH_EVENT_UP))
@@ -341,7 +395,14 @@ static irqreturn_t edt_ft5x06_ts_isr(int irq, void *dev_id)
 					       x, y, true);
 	}
 
-	input_mt_report_pointer_emulation(tsdata->input, true);
+	if (overlay) {
+		touch_overlay_sync_frame(&tsdata->touch_overlay_list,
+					 tsdata->input);
+		/* advances the MT frame the overlay helpers rely on */
+		input_mt_sync_frame(tsdata->input);
+	} else {
+		input_mt_report_pointer_emulation(tsdata->input, true);
+	}
 	input_sync(tsdata->input);
 
 out:
@@ -1300,6 +1361,13 @@ static int edt_ft5x06_ts_probe(struct i2c_client *client)
 			     0, tsdata->num_y * 64 - 1, 0, 0);
 
 	touchscreen_parse_properties(input, true, &tsdata->prop);
+
+	/* map overlay buttons and areas if defined in the device tree */
+	INIT_LIST_HEAD(&tsdata->touch_overlay_list);
+	error = touch_overlay_map(&tsdata->touch_overlay_list, input);
+	if (error)
+		return dev_err_probe(&client->dev, error,
+				     "failed to map the touch overlay\n");
 
 	error = input_mt_init_slots(input, tsdata->max_support_points,
 				    INPUT_MT_DIRECT);
