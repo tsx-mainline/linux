@@ -345,6 +345,7 @@ static const struct aiu_platform_data aiu_meson8_pdata = {
 	.has_acodec = false,
 	.has_clk_ctrl_more_i2s_div = false,
 	.has_i2s_in_clk = true,
+	.i2s_fifo_irq_per_buffer = true,
 };
 
 static const struct of_device_id aiu_of_match[] = {

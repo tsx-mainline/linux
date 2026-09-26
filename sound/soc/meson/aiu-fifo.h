@@ -7,6 +7,8 @@
 #ifndef _MESON_AIU_FIFO_H
 #define _MESON_AIU_FIFO_H
 
+#include <linux/hrtimer.h>
+
 struct snd_pcm_hardware;
 struct snd_soc_component_driver;
 struct snd_soc_dai_driver;
@@ -23,6 +25,15 @@ struct aiu_fifo {
 	unsigned int fifo_block;
 	struct clk *pclk;
 	int irq;
+	/*
+	 * The fifo interrupt only fires once per buffer (Meson8): report
+	 * the period progress from a timer instead.
+	 */
+	bool period_timer;
+	bool timer_running;
+	ktime_t timer_interval;
+	struct hrtimer timer;
+	struct snd_pcm_substream *substream;
 };
 
 int aiu_fifo_dai_probe(struct snd_soc_dai *dai);
