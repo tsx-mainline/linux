@@ -25,14 +25,52 @@
 #define AIU_CLK_CTRL_LRCLK_SKEW		GENMASK(9, 8)
 #define AIU_CLK_CTRL_MORE_HDMI_AMCLK	BIT(6)
 #define AIU_CLK_CTRL_MORE_I2S_DIV	GENMASK(5, 0)
+#define AIU_CLK_CTRL_MORE_ADC_DIV	GENMASK(13, 8)
+#define AIU_CLK_CTRL_MORE_ADC_EN	BIT(14)
 #define AIU_CODEC_DAC_LRCLK_CTRL_DIV	GENMASK(11, 0)
+#define AIU_CODEC_ADC_LRCLK_CTRL_DIV	GENMASK(11, 0)
 
 static void aiu_encoder_i2s_divider_enable(struct snd_soc_component *component,
 					   bool enable)
 {
+	struct aiu *aiu = snd_soc_component_get_drvdata(component);
+
 	snd_soc_component_update_bits(component, AIU_CLK_CTRL,
 				      AIU_CLK_CTRL_I2S_DIV_EN,
 				      enable ? AIU_CLK_CTRL_I2S_DIV_EN : 0);
+
+	/*
+	 * The I2S input (AUDIN) is clocked by the AIU "ADC" divider. Run it
+	 * together with the output divider so that a capture can join a
+	 * running playback without restarting the bus.
+	 */
+	if (aiu->platform->has_i2s_in_clk)
+		snd_soc_component_update_bits(component, AIU_CLK_CTRL_MORE,
+					      AIU_CLK_CTRL_MORE_ADC_EN,
+					      enable ? AIU_CLK_CTRL_MORE_ADC_EN : 0);
+}
+
+/*
+ * Start the output and the input dividers on the same master clock edge,
+ * as the vendor kernel does (audio_set_i2s_clk: master clock gated while
+ * the dividers are set up), so that the input frame clock is in phase with
+ * the one on the pads. Only possible while nobody else holds the master
+ * clock gate open.
+ */
+static void aiu_encoder_i2s_start_dividers(struct snd_soc_component *component)
+{
+	struct aiu *aiu = snd_soc_component_get_drvdata(component);
+	struct clk *mclk = aiu->i2s.clks[MCLK].clk;
+
+	if (!aiu->platform->has_i2s_in_clk) {
+		aiu_encoder_i2s_divider_enable(component, true);
+		return;
+	}
+
+	clk_disable(mclk);
+	aiu_encoder_i2s_divider_enable(component, true);
+	if (clk_enable(mclk))
+		dev_err(component->dev, "failed to re-enable the i2s mclk\n");
 }
 
 static int aiu_encoder_i2s_setup_desc(struct snd_soc_component *component,
@@ -176,6 +214,22 @@ static int aiu_encoder_i2s_set_clocks(struct snd_soc_component *component,
 	if (ret)
 		return ret;
 
+	/*
+	 * I2S input clocks: same bit clock (mclk / bs) and 64 bit clocks per
+	 * frame (vendor audio_set_i2s_clk: AIU_CLK_CTRL_MORE[13:8] = 4 - 1 at
+	 * 256 fs, AIU_CODEC_ADC_LRCLK_CTRL = 64 - 1).
+	 */
+	if (aiu->platform->has_i2s_in_clk) {
+		snd_soc_component_update_bits(component, AIU_CLK_CTRL_MORE,
+					      AIU_CLK_CTRL_MORE_ADC_DIV,
+					      FIELD_PREP(AIU_CLK_CTRL_MORE_ADC_DIV,
+							 bs - 1));
+		snd_soc_component_update_bits(component, AIU_CODEC_ADC_LRCLK_CTRL,
+					      AIU_CODEC_ADC_LRCLK_CTRL_DIV,
+					      FIELD_PREP(AIU_CODEC_ADC_LRCLK_CTRL_DIV,
+							 64 - 1));
+	}
+
 	/* Make sure amclk is used for HDMI i2s as well */
 	snd_soc_component_update_bits(component, AIU_CLK_CTRL_MORE,
 				      AIU_CLK_CTRL_MORE_HDMI_AMCLK,
@@ -189,15 +243,36 @@ static int aiu_encoder_i2s_hw_params(struct snd_pcm_substream *substream,
 				     struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
+	struct aiu *aiu = snd_soc_component_get_drvdata(component);
+	int dir = substream->stream;
+	bool playback = dir == SNDRV_PCM_STREAM_PLAYBACK;
 	int ret;
+
+	/*
+	 * The other direction already runs the bus (same rate: the dai is
+	 * symmetric). Only the playback memory layout may need an update.
+	 */
+	if (aiu->i2s_enc_streams & BIT(!dir)) {
+		if (playback) {
+			ret = aiu_encoder_i2s_setup_desc(component, params);
+			if (ret) {
+				dev_err(dai->dev, "setting i2s desc failed\n");
+				return ret;
+			}
+		}
+		aiu->i2s_enc_streams |= BIT(dir);
+		return 0;
+	}
 
 	/* Disable the clock while changing the settings */
 	aiu_encoder_i2s_divider_enable(component, false);
 
-	ret = aiu_encoder_i2s_setup_desc(component, params);
-	if (ret) {
-		dev_err(dai->dev, "setting i2s desc failed\n");
-		return ret;
+	if (playback) {
+		ret = aiu_encoder_i2s_setup_desc(component, params);
+		if (ret) {
+			dev_err(dai->dev, "setting i2s desc failed\n");
+			return ret;
+		}
 	}
 
 	ret = aiu_encoder_i2s_set_clocks(component, params);
@@ -206,7 +281,8 @@ static int aiu_encoder_i2s_hw_params(struct snd_pcm_substream *substream,
 		return ret;
 	}
 
-	aiu_encoder_i2s_divider_enable(component, true);
+	aiu_encoder_i2s_start_dividers(component);
+	aiu->i2s_enc_streams |= BIT(dir);
 
 	return 0;
 }
@@ -215,8 +291,11 @@ static int aiu_encoder_i2s_hw_free(struct snd_pcm_substream *substream,
 				   struct snd_soc_dai *dai)
 {
 	struct snd_soc_component *component = dai->component;
+	struct aiu *aiu = snd_soc_component_get_drvdata(component);
 
-	aiu_encoder_i2s_divider_enable(component, false);
+	aiu->i2s_enc_streams &= ~BIT(substream->stream);
+	if (!aiu->i2s_enc_streams)
+		aiu_encoder_i2s_divider_enable(component, false);
 
 	return 0;
 }

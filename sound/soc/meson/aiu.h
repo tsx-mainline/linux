@@ -30,6 +30,8 @@ struct aiu_interface {
 struct aiu_platform_data {
 	bool has_acodec;
 	bool has_clk_ctrl_more_i2s_div;
+	/* the AUDIN I2S input takes its clocks from the AIU "ADC" divider */
+	bool has_i2s_in_clk;
 };
 
 struct aiu {
@@ -37,6 +39,8 @@ struct aiu {
 	struct aiu_interface i2s;
 	struct aiu_interface spdif;
 	const struct aiu_platform_data *platform;
+	/* directions (BIT(SNDRV_PCM_STREAM_*)) with the i2s encoder set up */
+	unsigned int i2s_enc_streams;
 };
 
 #define AIU_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |	\
@@ -73,6 +77,7 @@ extern const struct snd_soc_dai_ops aiu_encoder_spdif_dai_ops;
 #define AIU_CLK_CTRL			0x058
 #define AIU_CLK_CTRL_MORE		0x064
 #define AIU_CODEC_DAC_LRCLK_CTRL	0x0a0
+#define AIU_CODEC_ADC_LRCLK_CTRL	0x0a4
 #define AIU_HDMI_CLK_DATA_CTRL		0x0a8
 #define AIU_ACODEC_CTRL			0x0b0
 #define AIU_958_CHSTAT_R0		0x0c0

@@ -144,7 +144,19 @@ static struct snd_soc_dai_driver aiu_cpu_dai_drv[] = {
 			.rates = SNDRV_PCM_RATE_8000_192000,
 			.formats = AIU_FORMATS,
 		},
+		/*
+		 * The bus clocks for an I2S input (AUDIN on Meson8), which
+		 * shares the bit and frame clocks of the encoder.
+		 */
+		.capture = {
+			.stream_name = "I2S Encoder Capture",
+			.channels_min = 2,
+			.channels_max = 2,
+			.rates = SNDRV_PCM_RATE_8000_192000,
+			.formats = AIU_FORMATS,
+		},
 		.ops = &aiu_encoder_i2s_dai_ops,
+		.symmetric_rate = 1,
 	},
 	[CPU_SPDIF_ENCODER] = {
 		.name = "SPDIF Encoder",
@@ -332,6 +344,7 @@ static const struct aiu_platform_data aiu_gxl_pdata = {
 static const struct aiu_platform_data aiu_meson8_pdata = {
 	.has_acodec = false,
 	.has_clk_ctrl_more_i2s_div = false,
+	.has_i2s_in_clk = true,
 };
 
 static const struct of_device_id aiu_of_match[] = {
