@@ -186,6 +186,12 @@ static int meson_pinconf_set_gpio_bit(struct meson_pinctrl *pc,
 	unsigned int reg, bit;
 	int ret;
 
+	if (pc->data->gpio_set_bit) {
+		ret = pc->data->gpio_set_bit(pc, pin, reg_type, arg);
+		if (ret != -EOPNOTSUPP)
+			return ret;
+	}
+
 	ret = meson_get_bank(pc, pin, &bank);
 	if (ret)
 		return ret;
@@ -202,6 +208,12 @@ static int meson_pinconf_get_gpio_bit(struct meson_pinctrl *pc,
 	const struct meson_bank *bank;
 	unsigned int reg, bit, val;
 	int ret;
+
+	if (pc->data->gpio_get_bit) {
+		ret = pc->data->gpio_get_bit(pc, pin, reg_type);
+		if (ret != -EOPNOTSUPP)
+			return ret;
+	}
 
 	ret = meson_get_bank(pc, pin, &bank);
 	if (ret)
@@ -289,13 +301,16 @@ static int meson_pinconf_enable_bias(struct meson_pinctrl *pc, unsigned int pin,
 	if (ret)
 		return ret;
 
-	meson_calc_reg_and_bit(bank, pin, MESON_REG_PULL, &reg, &bit);
-	if (pull_up)
-		val = BIT(bit);
+	if (!pc->data->pull_dir_writable ||
+	    pc->data->pull_dir_writable(pc, pin)) {
+		meson_calc_reg_and_bit(bank, pin, MESON_REG_PULL, &reg, &bit);
+		if (pull_up)
+			val = BIT(bit);
 
-	ret = regmap_update_bits(pc->reg_pull, reg, BIT(bit), val);
-	if (ret)
-		return ret;
+		ret = regmap_update_bits(pc->reg_pull, reg, BIT(bit), val);
+		if (ret)
+			return ret;
+	}
 
 	meson_calc_reg_and_bit(bank, pin, MESON_REG_PULLEN, &reg, &bit);
 	ret = regmap_update_bits(pc->reg_pullen, reg, BIT(bit),	BIT(bit));
@@ -587,19 +602,8 @@ static int meson_gpio_set(struct gpio_chip *chip, unsigned int gpio, int value)
 
 static int meson_gpio_get(struct gpio_chip *chip, unsigned gpio)
 {
-	struct meson_pinctrl *pc = gpiochip_get_data(chip);
-	const struct meson_bank *bank;
-	unsigned int reg, bit, val;
-	int ret;
-
-	ret = meson_get_bank(pc, gpio, &bank);
-	if (ret)
-		return ret;
-
-	meson_calc_reg_and_bit(bank, gpio, MESON_REG_IN, &reg, &bit);
-	regmap_read(pc->reg_gpio, reg, &val);
-
-	return !!(val & BIT(bit));
+	return meson_pinconf_get_gpio_bit(gpiochip_get_data(chip), gpio,
+					  MESON_REG_IN);
 }
 
 static int meson_gpiolib_register(struct meson_pinctrl *pc)
