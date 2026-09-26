@@ -1792,17 +1792,38 @@ static struct clk_regmap meson8b_hdmi_tx_pixel = {
 	},
 };
 
+/*
+ * The encoder clock selectors take values 0..4 for VCLK div1/2/4/6/12 and
+ * 8..12 for VCLK2 div1/2/4/6/12. The LCD (ENCL) path uses VCLK2 so the
+ * VCLK path stays free for HDMI/CVBS.
+ */
+static u32 meson8b_vclk_vclk2_enc_table[] = { 0, 1, 2, 3, 4, 8, 9, 10, 11, 12 };
+
+static const struct clk_hw *meson8b_vclk_vclk2_enc_parents[] = {
+	&meson8b_vclk_div1.hw,
+	&meson8b_vclk_div2.hw,
+	&meson8b_vclk_div4.hw,
+	&meson8b_vclk_div6.hw,
+	&meson8b_vclk_div12.hw,
+	&meson8b_vclk2_div1.hw,
+	&meson8b_vclk2_div2.hw,
+	&meson8b_vclk2_div4.hw,
+	&meson8b_vclk2_div6.hw,
+	&meson8b_vclk2_div12.hw,
+};
+
 static struct clk_regmap meson8b_cts_encl_sel = {
 	.data = &(struct clk_regmap_mux_data){
 		.offset = HHI_VIID_CLK_DIV,
 		.mask = 0xf,
 		.shift = 12,
+		.table = meson8b_vclk_vclk2_enc_table,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "cts_encl_sel",
 		.ops = &clk_regmap_mux_ops,
-		.parent_hws = meson8b_vclk_enc_parents,
-		.num_parents = ARRAY_SIZE(meson8b_vclk_enc_parents),
+		.parent_hws = meson8b_vclk_vclk2_enc_parents,
+		.num_parents = ARRAY_SIZE(meson8b_vclk_vclk2_enc_parents),
 		.flags = CLK_SET_RATE_PARENT,
 	},
 };
