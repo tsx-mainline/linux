@@ -64,6 +64,12 @@ static int gx_card_parse_i2s(struct snd_soc_card *card,
 	return 0;
 }
 
+static const struct of_device_id gx_card_capture_fe_ids[] = {
+	{ .compatible = DT_PREFIX "meson8-audin" },
+	{ .compatible = DT_PREFIX "meson8b-audin" },
+	{}
+};
+
 static int gx_card_cpu_identify(struct snd_soc_dai_link_component *c,
 				char *match)
 {
@@ -96,6 +102,10 @@ static int gx_card_add_link(struct snd_soc_card *card, struct device_node *np,
 
 	if (gx_card_cpu_identify(dai_link->cpus, "FIFO"))
 		return  meson_card_set_fe_link(card, dai_link, np, true);
+
+	/* AUDIN: capture front-end, clocked by the AIU I2S encoder back-end */
+	if (of_match_node(gx_card_capture_fe_ids, dai_link->cpus->of_node))
+		return meson_card_set_fe_link(card, dai_link, np, false);
 
 	ret = meson_card_set_be_link(card, dai_link, np);
 	if (ret)
