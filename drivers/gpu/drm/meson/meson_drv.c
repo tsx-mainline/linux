@@ -37,6 +37,7 @@
 #include "meson_encoder_cvbs.h"
 #include "meson_encoder_hdmi.h"
 #include "meson_encoder_dsi.h"
+#include "meson_encoder_lvds.h"
 #include "meson_viu.h"
 #include "meson_vpp.h"
 #include "meson_rdma.h"
@@ -444,21 +445,27 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
 			goto hdmi_encoder_remove;
 	}
 
+	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_M8M2)) {
+		ret = meson_encoder_lvds_probe(priv);
+		if (ret)
+			goto dsi_encoder_remove;
+	}
+
 	ret = meson_plane_create(priv);
 	if (ret)
-		goto dsi_encoder_remove;
+		goto lvds_encoder_remove;
 
 	ret = meson_overlay_create(priv);
 	if (ret)
-		goto dsi_encoder_remove;
+		goto lvds_encoder_remove;
 
 	ret = meson_crtc_create(priv);
 	if (ret)
-		goto dsi_encoder_remove;
+		goto lvds_encoder_remove;
 
 	ret = request_irq(priv->vsync_irq, meson_irq, 0, drm->driver->name, drm);
 	if (ret)
-		goto dsi_encoder_remove;
+		goto lvds_encoder_remove;
 
 	drm_mode_config_reset(drm);
 
@@ -476,6 +483,8 @@ static int meson_drv_bind_master(struct device *dev, bool has_components)
 
 uninstall_irq:
 	free_irq(priv->vsync_irq, drm);
+lvds_encoder_remove:
+	meson_encoder_lvds_remove(priv);
 dsi_encoder_remove:
 	if (meson_vpu_is_compatible(priv, VPU_COMPATIBLE_G12A))
 		meson_encoder_dsi_remove(priv);
@@ -528,6 +537,7 @@ static void meson_drv_unbind(struct device *dev)
 	free_irq(priv->vsync_irq, drm);
 	drm_dev_put(drm);
 
+	meson_encoder_lvds_remove(priv);
 	meson_encoder_dsi_remove(priv);
 	meson_encoder_hdmi_remove(priv);
 	meson_encoder_cvbs_remove(priv);
