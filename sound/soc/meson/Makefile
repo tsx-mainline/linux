@@ -21,12 +21,14 @@ snd-soc-meson-axg-spdifout-y := axg-spdifout.o
 snd-soc-meson-axg-pdm-y := axg-pdm.o
 snd-soc-meson-card-utils-y := meson-card-utils.o
 snd-soc-meson-codec-glue-y := meson-codec-glue.o
+snd-soc-meson-audin-y := audin.o
 snd-soc-meson-gx-sound-card-y := gx-card.o
 snd-soc-meson-g12a-toacodec-y := g12a-toacodec.o
 snd-soc-meson-g12a-tohdmitx-y := g12a-tohdmitx.o
 snd-soc-meson-t9015-y := t9015.o
 
 obj-$(CONFIG_SND_MESON_AIU) += snd-soc-meson-aiu.o
+obj-$(CONFIG_SND_MESON_AUDIN) += snd-soc-meson-audin.o
 obj-$(CONFIG_SND_MESON_AXG_FIFO) += snd-soc-meson-axg-fifo.o
 obj-$(CONFIG_SND_MESON_AXG_FRDDR) += snd-soc-meson-axg-frddr.o
 obj-$(CONFIG_SND_MESON_AXG_TODDR) += snd-soc-meson-axg-toddr.o
