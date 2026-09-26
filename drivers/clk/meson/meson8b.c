@@ -7,6 +7,7 @@
  * Michael Turquette <mturquette@baylibre.com>
  */
 
+#include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/init.h>
@@ -40,6 +41,7 @@
 #define HHI_GP_PLL_CNTL5		0x50
 #define HHI_VIID_CLK_DIV		0x128
 #define HHI_VIID_CLK_CNTL		0x12c
+#define HHI_VIID_DIVIDER_CNTL		0x130
 #define HHI_GCLK_MPEG0			0x140
 #define HHI_GCLK_MPEG1			0x144
 #define HHI_GCLK_MPEG2			0x148
@@ -314,6 +316,281 @@ static struct clk_regmap meson8b_hdmi_pll_hdmi_out = {
 		.ops = &clk_regmap_divider_ops,
 		.parent_hws = (const struct clk_hw *[]) {
 			&meson8b_hdmi_pll_dco.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+/*
+ * Meson8m2 VID2 PLL, the source of the LCD (ENCL) pixel clock.
+ *
+ *   rate = xtal * (OD_FB + 1) * (M + FRAC / 4096) / N
+ *
+ * with the DCO between 1.2 GHz and 3.0 GHz. The analog settings in CNTL2,
+ * CNTL3 and the feedback divider OD_FB (CNTL5[8]) depend on the DCO range,
+ * which the vendor driver calls the "level" (arch/arm/mach-meson8/lcd/
+ * lcd_config.c: vclk_set_lcd()). That rules out the generic meson PLL ops
+ * with fixed init_regs, so this PLL has its own ops.
+ *
+ * CNTL5[25:23] routes the PLL output: 2 = VID2 path (LVDS/TTL), 3 = MIPI DSI
+ * PHY, 4 = eDP PHY. Only the VID2 path is modelled.
+ */
+#define MESON8M2_VID2_PLL_DCO_MIN	1200000000UL
+#define MESON8M2_VID2_PLL_DCO_MAX	3000000000UL
+#define MESON8M2_VID2_PLL_OD_FB_MIN	1700000000UL
+#define MESON8M2_VID2_PLL_FRAC_SHIFT	12
+#define MESON8M2_VID2_PLL_LOCK		BIT(31)
+#define MESON8M2_VID2_PLL_EN		BIT(30)
+#define MESON8M2_VID2_PLL_RST		BIT(29)
+#define MESON8M2_VID2_PLL_N		GENMASK(28, 24)
+#define MESON8M2_VID2_PLL_M		GENMASK(8, 0)
+#define MESON8M2_VID2_PLL_FRAC		GENMASK(11, 0)
+#define MESON8M2_VID2_PLL_OD_FB		BIT(8)
+#define MESON8M2_VID2_PLL_OUT_SEL	GENMASK(25, 23)
+#define MESON8M2_VID2_PLL_OUT_VID2	2
+
+static unsigned int meson8m2_vid2_pll_od_fb(unsigned long dco)
+{
+	return dco >= MESON8M2_VID2_PLL_OD_FB_MIN;
+}
+
+static unsigned long meson8m2_vid2_pll_rate(unsigned long parent_rate,
+					    unsigned int m, unsigned int n,
+					    unsigned int frac, unsigned int od_fb)
+{
+	u64 rate = (u64)parent_rate * (od_fb + 1) *
+		   ((m << MESON8M2_VID2_PLL_FRAC_SHIFT) + frac);
+
+	if (!n)
+		return 0;
+
+	/*
+	 * Round up: set_rate() gets the rate returned by determine_rate()
+	 * and must derive the same FRAC from it. With a rate rounded down
+	 * to the Hz, the truncating FRAC calculation would lose one step.
+	 */
+	return DIV_ROUND_UP_ULL(rate, n << MESON8M2_VID2_PLL_FRAC_SHIFT);
+}
+
+/* N is always 1, like the vendor driver; FRAC is truncated like it too. */
+static void meson8m2_vid2_pll_params(unsigned long rate,
+				     unsigned long parent_rate,
+				     unsigned int *m, unsigned int *frac,
+				     unsigned int *od_fb)
+{
+	u64 ref;
+
+	rate = clamp(rate, MESON8M2_VID2_PLL_DCO_MIN,
+		     MESON8M2_VID2_PLL_DCO_MAX);
+	*od_fb = meson8m2_vid2_pll_od_fb(rate);
+	ref = (u64)parent_rate * (*od_fb + 1);
+	*m = div64_u64(rate, ref);
+	*frac = div64_u64((rate - *m * ref) << MESON8M2_VID2_PLL_FRAC_SHIFT,
+			  ref);
+}
+
+static unsigned long meson8m2_vid2_pll_recalc_rate(struct clk_hw *hw,
+						   unsigned long parent_rate)
+{
+	struct clk_regmap *clk = to_clk_regmap(hw);
+	unsigned int cntl, cntl2, cntl5;
+
+	regmap_read(clk->map, HHI_VID2_PLL_CNTL, &cntl);
+	regmap_read(clk->map, HHI_VID2_PLL_CNTL2, &cntl2);
+	regmap_read(clk->map, HHI_VID2_PLL_CNTL5, &cntl5);
+
+	return meson8m2_vid2_pll_rate(parent_rate,
+				      FIELD_GET(MESON8M2_VID2_PLL_M, cntl),
+				      FIELD_GET(MESON8M2_VID2_PLL_N, cntl),
+				      FIELD_GET(MESON8M2_VID2_PLL_FRAC, cntl2),
+				      FIELD_GET(MESON8M2_VID2_PLL_OD_FB, cntl5));
+}
+
+static int meson8m2_vid2_pll_determine_rate(struct clk_hw *hw,
+					    struct clk_rate_request *req)
+{
+	unsigned int m, frac, od_fb;
+
+	meson8m2_vid2_pll_params(req->rate, req->best_parent_rate,
+				 &m, &frac, &od_fb);
+	req->rate = meson8m2_vid2_pll_rate(req->best_parent_rate, m, 1, frac,
+					   od_fb);
+
+	return 0;
+}
+
+static int meson8m2_vid2_pll_is_enabled(struct clk_hw *hw)
+{
+	struct clk_regmap *clk = to_clk_regmap(hw);
+	unsigned int cntl;
+
+	regmap_read(clk->map, HHI_VID2_PLL_CNTL, &cntl);
+
+	return (cntl & MESON8M2_VID2_PLL_EN) && !(cntl & MESON8M2_VID2_PLL_RST);
+}
+
+static int meson8m2_vid2_pll_wait_lock(struct clk_hw *hw, bool level2)
+{
+	struct clk_regmap *clk = to_clk_regmap(hw);
+	unsigned int cntl;
+	int ret;
+
+	ret = regmap_read_poll_timeout_atomic(clk->map, HHI_VID2_PLL_CNTL, cntl,
+					      cntl & MESON8M2_VID2_PLL_LOCK,
+					      50, 5000);
+	if (!ret || !level2)
+		return ret;
+
+	/* vendor fallback for the 1.7 GHz..2.0 GHz range */
+	regmap_set_bits(clk->map, HHI_VID2_PLL_CNTL2, BIT(18));
+	regmap_set_bits(clk->map, HHI_VID2_PLL_CNTL, MESON8M2_VID2_PLL_RST);
+	regmap_clear_bits(clk->map, HHI_VID2_PLL_CNTL, MESON8M2_VID2_PLL_RST);
+
+	return regmap_read_poll_timeout_atomic(clk->map, HHI_VID2_PLL_CNTL,
+					       cntl,
+					       cntl & MESON8M2_VID2_PLL_LOCK,
+					       50, 5000);
+}
+
+static bool meson8m2_vid2_pll_is_level2(struct clk_hw *hw)
+{
+	unsigned long dco = clk_hw_get_rate(hw);
+
+	return dco >= MESON8M2_VID2_PLL_OD_FB_MIN && dco < 2000000000UL;
+}
+
+static int meson8m2_vid2_pll_enable(struct clk_hw *hw)
+{
+	struct clk_regmap *clk = to_clk_regmap(hw);
+
+	if (meson8m2_vid2_pll_is_enabled(hw))
+		return 0;
+
+	regmap_set_bits(clk->map, HHI_VID2_PLL_CNTL,
+			MESON8M2_VID2_PLL_EN | MESON8M2_VID2_PLL_RST);
+	regmap_clear_bits(clk->map, HHI_VID2_PLL_CNTL, MESON8M2_VID2_PLL_RST);
+
+	if (meson8m2_vid2_pll_wait_lock(hw, meson8m2_vid2_pll_is_level2(hw))) {
+		pr_err("%s: PLL did not lock\n", clk_hw_get_name(hw));
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static void meson8m2_vid2_pll_disable(struct clk_hw *hw)
+{
+	struct clk_regmap *clk = to_clk_regmap(hw);
+
+	regmap_set_bits(clk->map, HHI_VID2_PLL_CNTL, MESON8M2_VID2_PLL_RST);
+	regmap_clear_bits(clk->map, HHI_VID2_PLL_CNTL, MESON8M2_VID2_PLL_EN);
+}
+
+static int meson8m2_vid2_pll_set_rate(struct clk_hw *hw, unsigned long rate,
+				      unsigned long parent_rate)
+{
+	struct clk_regmap *clk = to_clk_regmap(hw);
+	unsigned int m, frac, od_fb;
+	unsigned long dco;
+	u32 cntl2, cntl3;
+	bool enabled;
+
+	meson8m2_vid2_pll_params(rate, parent_rate, &m, &frac, &od_fb);
+	dco = meson8m2_vid2_pll_rate(parent_rate, m, 1, frac, od_fb);
+
+	cntl2 = frac ? (0x0431a000 | frac) : 0x0421a000;
+	if (dco < MESON8M2_VID2_PLL_OD_FB_MIN) {
+		/* Meson8m2 needs [15:12] cleared to lock at 1.2 GHz */
+		cntl2 &= ~GENMASK(15, 12);
+		cntl3 = 0xca45b823;
+	} else if (dco < 2000000000UL) {
+		cntl2 |= BIT(19);
+		cntl3 = 0xca49b823;
+	} else if (dco < 2500000000UL) {
+		cntl3 = 0xca49b823;
+	} else {
+		cntl3 = 0xce49c022;
+	}
+
+	enabled = meson8m2_vid2_pll_is_enabled(hw);
+	if (enabled)
+		meson8m2_vid2_pll_disable(hw);
+
+	/* bandgap, shared with the HDMI PLL */
+	regmap_set_bits(clk->map, HHI_VID_PLL_CNTL5, BIT(16));
+	regmap_write(clk->map, HHI_VID2_PLL_CNTL2, cntl2);
+	regmap_write(clk->map, HHI_VID2_PLL_CNTL3, cntl3);
+	/* spread spectrum off */
+	regmap_write(clk->map, HHI_VID2_PLL_CNTL4, 0xd4000d67);
+	regmap_write(clk->map, HHI_VID2_PLL_CNTL5,
+		     0x00700001 |
+		     FIELD_PREP(MESON8M2_VID2_PLL_OD_FB, od_fb) |
+		     FIELD_PREP(MESON8M2_VID2_PLL_OUT_SEL,
+				MESON8M2_VID2_PLL_OUT_VID2));
+	regmap_update_bits(clk->map, HHI_VID2_PLL_CNTL,
+			   MESON8M2_VID2_PLL_N | MESON8M2_VID2_PLL_M,
+			   FIELD_PREP(MESON8M2_VID2_PLL_N, 1) |
+			   FIELD_PREP(MESON8M2_VID2_PLL_M, m));
+
+	if (!enabled)
+		return 0;
+
+	regmap_set_bits(clk->map, HHI_VID2_PLL_CNTL,
+			MESON8M2_VID2_PLL_EN | MESON8M2_VID2_PLL_RST);
+	regmap_clear_bits(clk->map, HHI_VID2_PLL_CNTL, MESON8M2_VID2_PLL_RST);
+
+	if (meson8m2_vid2_pll_wait_lock(hw, cntl2 & BIT(19))) {
+		pr_err("%s: PLL did not lock at %lu Hz\n",
+		       clk_hw_get_name(hw), dco);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static const struct clk_ops meson8m2_vid2_pll_ops = {
+	.init		= clk_regmap_init,
+	.recalc_rate	= meson8m2_vid2_pll_recalc_rate,
+	.determine_rate	= meson8m2_vid2_pll_determine_rate,
+	.set_rate	= meson8m2_vid2_pll_set_rate,
+	.is_enabled	= meson8m2_vid2_pll_is_enabled,
+	.enable		= meson8m2_vid2_pll_enable,
+	.disable	= meson8m2_vid2_pll_disable,
+};
+
+static struct clk_regmap meson8m2_vid2_pll_dco = {
+	.hw.init = &(struct clk_init_data){
+		.name = "vid2_pll_dco",
+		.ops = &meson8m2_vid2_pll_ops,
+		.parent_data = &(const struct clk_parent_data) {
+			.fw_name = "xtal",
+			.index = -1,
+		},
+		.num_parents = 1,
+	},
+};
+
+/* OD: the vendor driver only uses /1, /2 and /4 */
+static const struct clk_div_table meson8m2_vid2_pll_od_table[] = {
+	{ .val = 0, .div = 1 },
+	{ .val = 1, .div = 2 },
+	{ .val = 2, .div = 4 },
+	{ /* sentinel */ }
+};
+
+static struct clk_regmap meson8m2_vid2_pll = {
+	.data = &(struct clk_regmap_div_data){
+		.offset = HHI_VID2_PLL_CNTL,
+		.shift = 9,
+		.width = 2,
+		.table = meson8m2_vid2_pll_od_table,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "vid2_pll",
+		.ops = &clk_regmap_divider_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_vid2_pll_dco.hw
 		},
 		.num_parents = 1,
 		.flags = CLK_SET_RATE_PARENT,
@@ -1284,12 +1561,158 @@ static struct clk_regmap meson8b_vid_pll_final_div = {
 	},
 };
 
+/*
+ * Meson8m2: HHI_VIID_DIVIDER_CNTL has the same layout as HHI_VID_DIVIDER_CNTL
+ * and divides the VID2 PLL for the VCLK2 path. For LVDS the vendor driver
+ * uses pre_div /1, post_div /7 (LVDS bit clock -> pixel clock) and selects
+ * the post divider output. Bit 11 (LVDS_CLK_EN) is set by the vendor driver
+ * for LVDS; it is modelled as a gate on the VID2 PLL input.
+ */
+static struct clk_regmap meson8m2_viid_pll_lvds_en = {
+	.data = &(struct clk_regmap_gate_data){
+		.offset = HHI_VIID_DIVIDER_CNTL,
+		.bit_idx = 11,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "viid_pll_lvds_en",
+		.ops = &clk_regmap_gate_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_vid2_pll.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+/* 1 = VID2 PLL; the other input (0) is not known */
+static u32 meson8m2_viid_pll_in_sel_table[] = { 1 };
+
+static struct clk_regmap meson8m2_viid_pll_in_sel = {
+	.data = &(struct clk_regmap_mux_data){
+		.offset = HHI_VIID_DIVIDER_CNTL,
+		.mask = 0x1,
+		.shift = 15,
+		.table = meson8m2_viid_pll_in_sel_table,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "viid_pll_in_sel",
+		.ops = &clk_regmap_mux_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_viid_pll_lvds_en.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+static struct clk_regmap meson8m2_viid_pll_in_en = {
+	.data = &(struct clk_regmap_gate_data){
+		.offset = HHI_VIID_DIVIDER_CNTL,
+		.bit_idx = 16,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "viid_pll_in_en",
+		.ops = &clk_regmap_gate_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_viid_pll_in_sel.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+static struct clk_regmap meson8m2_viid_pll_pre_div = {
+	.data = &(struct clk_regmap_div_data){
+		.offset = HHI_VIID_DIVIDER_CNTL,
+		.shift = 4,
+		.width = 3,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "viid_pll_pre_div",
+		.ops = &clk_regmap_divider_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_viid_pll_in_en.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+static struct clk_regmap meson8m2_viid_pll_post_div = {
+	.data = &(struct clk_regmap_div_data){
+		.offset = HHI_VIID_DIVIDER_CNTL,
+		.shift = 12,
+		.width = 3,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "viid_pll_post_div",
+		.ops = &clk_regmap_divider_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_viid_pll_pre_div.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+static struct clk_regmap meson8m2_viid_pll = {
+	.data = &(struct clk_regmap_mux_data){
+		.offset = HHI_VIID_DIVIDER_CNTL,
+		.mask = 0x3,
+		.shift = 8,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "viid_pll",
+		.ops = &clk_regmap_mux_ops,
+		/* TODO: parent 0x2 is viid_pll_pre_div_mult7_div2 */
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_viid_pll_pre_div.hw,
+			&meson8m2_viid_pll_post_div.hw,
+		},
+		.num_parents = 2,
+		/* LVDS needs the post divider; the consumer selects it */
+		.flags = CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
+	},
+};
+
+/* VCLK2 XD divider */
+static struct clk_regmap meson8m2_vid2_pll_final_div = {
+	.data = &(struct clk_regmap_div_data){
+		.offset = HHI_VIID_CLK_DIV,
+		.shift = 0,
+		.width = 8,
+	},
+	.hw.init = &(struct clk_init_data){
+		.name = "vid2_pll_final_div",
+		.ops = &clk_regmap_divider_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8m2_viid_pll.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
 static const struct clk_hw *meson8b_vclk_parents[] = {
 	&meson8b_vid_pll_final_div.hw,
 	&meson8b_fclk_div4.hw,
 	&meson8b_fclk_div3.hw,
 	&meson8b_fclk_div5.hw,
 	&meson8b_vid_pll_final_div.hw,
+	&meson8b_fclk_div7.hw,
+	&meson8b_mpll1.hw,
+};
+
+/*
+ * Input 4 of the VCLK2 mux is the VID2 PLL path. It only exists (and is only
+ * registered) on Meson8m2; on Meson8 and Meson8b that parent stays orphaned.
+ */
+static const struct clk_hw *meson8b_vclk2_parents[] = {
+	&meson8b_vid_pll_final_div.hw,
+	&meson8b_fclk_div4.hw,
+	&meson8b_fclk_div3.hw,
+	&meson8b_fclk_div5.hw,
+	&meson8m2_vid2_pll_final_div.hw,
 	&meson8b_fclk_div7.hw,
 	&meson8b_mpll1.hw,
 };
@@ -1486,8 +1909,8 @@ static struct clk_regmap meson8b_vclk2_in_sel = {
 	.hw.init = &(struct clk_init_data){
 		.name = "vclk2_in_sel",
 		.ops = &clk_regmap_mux_ops,
-		.parent_hws = meson8b_vclk_parents,
-		.num_parents = ARRAY_SIZE(meson8b_vclk_parents),
+		.parent_hws = meson8b_vclk2_parents,
+		.num_parents = ARRAY_SIZE(meson8b_vclk2_parents),
 		.flags = CLK_SET_RATE_PARENT | CLK_SET_RATE_NO_REPARENT,
 	},
 };
@@ -3567,6 +3990,15 @@ static struct clk_hw *meson8m2_hw_clks[] = {
 	[CLKID_VID_PLL_LVDS_EN]	    = &meson8b_vid_pll_lvds_en.hw,
 	[CLKID_HDMI_PLL_DCO_IN]	    = &hdmi_pll_dco_in.hw,
 	[CLKID_MPEG_RTC_OSC_SEL]    = &meson8b_mpeg_rtc_osc_sel.hw,
+	[CLKID_VID2_PLL_DCO]	    = &meson8m2_vid2_pll_dco.hw,
+	[CLKID_VID2_PLL]	    = &meson8m2_vid2_pll.hw,
+	[CLKID_VIID_PLL_LVDS_EN]    = &meson8m2_viid_pll_lvds_en.hw,
+	[CLKID_VIID_PLL_IN_SEL]	    = &meson8m2_viid_pll_in_sel.hw,
+	[CLKID_VIID_PLL_IN_EN]	    = &meson8m2_viid_pll_in_en.hw,
+	[CLKID_VIID_PLL_PRE_DIV]    = &meson8m2_viid_pll_pre_div.hw,
+	[CLKID_VIID_PLL_POST_DIV]   = &meson8m2_viid_pll_post_div.hw,
+	[CLKID_VIID_PLL]	    = &meson8m2_viid_pll.hw,
+	[CLKID_VID2_PLL_FINAL_DIV]  = &meson8m2_vid2_pll_final_div.hw,
 };
 
 static const struct meson8b_clk_reset_line {
