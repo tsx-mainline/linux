@@ -53,6 +53,9 @@ description: |
   tree and provides the scanout clock to the VPP and VIU.
   The ENCI is connected to a single VDAC for Composite Output.
   The ENCI and ENCP are connected to an on-chip HDMI Transceiver.
+  On Meson8m2 the ENCL feeds an on-chip LVDS transmitter. Its pixel clock
+  comes from the VID2 PLL through the VCLK2 tree, its PHY registers are in
+  the HHI system controller.
 
 properties:
   compatible:
@@ -74,12 +77,65 @@ properties:
     maxItems: 2
 
   reg-names:
+    minItems: 1
     items:
       - const: vpu
       - const: hhi
 
   interrupts:
     maxItems: 1
+
+  clocks:
+    minItems: 10
+    maxItems: 21
+
+  clock-names:
+    minItems: 10
+    items:
+      - const: vpu_intr
+      - const: hdmi_intr_sync
+      - const: venci_int
+      - const: tmds
+      - const: hdmi_tx_pixel
+      - const: cts_encp
+      - const: cts_enci
+      - const: cts_enct
+      - const: cts_encl
+      - const: cts_vdac0
+      - const: vid2_pll
+      - const: viid_pll_pre_div
+      - const: viid_pll_post_div
+      - const: viid_pll
+      - const: vid2_pll_final_div
+      - const: vclk2_in_sel
+      - const: vclk2_div1
+      - const: cts_encl_sel
+      - const: vclk2_vencl
+      - const: edp
+      - const: vclk2_encl
+
+  resets:
+    minItems: 4
+    maxItems: 9
+
+  reset-names:
+    minItems: 4
+    items:
+      - const: vid_pll_pre
+      - const: vid_pll_post
+      - const: vid_pll_soft_pre
+      - const: vid_pll_soft_post
+      - const: viid_pll_pre
+      - const: viid_pll_post
+      - const: viid_pll_soft_pre
+      - const: viid_pll_soft_post
+      - const: vclk2_soft
+
+  amlogic,hhi-sysctrl:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the HHI system controller, which holds the LVDS/DSI/eDP PHY
+      registers used by the Meson8m2 LVDS output.
 
   amlogic,canvas:
     description: should point to a canvas provider node
@@ -113,6 +169,12 @@ properties:
     description:
       A port node pointing to the DPI port node (e.g. DSI or LVDS transceiver).
 
+  port@3:
+    $ref: /schemas/graph.yaml#/properties/port
+    description:
+      A port node pointing to the LVDS panel driven by the on-chip LVDS
+      transmitter (Meson8m2 only).
+
   "#address-cells":
     const: 1
 
@@ -128,6 +190,58 @@ required:
   - "#address-cells"
   - "#size-cells"
   - amlogic,canvas
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            enum:
+              - amlogic,meson8-vpu
+              - amlogic,meson8b-vpu
+              - amlogic,meson8m2-vpu
+    then:
+      required:
+        - clocks
+        - clock-names
+        - resets
+        - reset-names
+    else:
+      properties:
+        clocks: false
+        clock-names: false
+        resets: false
+        reset-names: false
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: amlogic,meson8m2-vpu
+    then:
+      if:
+        required:
+          - port@3
+      then:
+        properties:
+          clocks:
+            minItems: 18
+          clock-names:
+            minItems: 18
+        required:
+          - amlogic,hhi-sysctrl
+    else:
+      properties:
+        clocks:
+          maxItems: 10
+        clock-names:
+          maxItems: 10
+        resets:
+          maxItems: 4
+        reset-names:
+          maxItems: 4
+        amlogic,hhi-sysctrl: false
+        port@3: false
 
 additionalProperties: false
 
@@ -160,6 +274,74 @@ examples:
 
             hdmi_tx_out: endpoint {
                 remote-endpoint = <&hdmi_tx_in>;
+            };
+        };
+    };
+
+  - |
+    #include <dt-bindings/clock/meson8b-clkc.h>
+    #include <dt-bindings/reset/amlogic,meson8b-clkc-reset.h>
+
+    vpu@100000 {
+        compatible = "amlogic,meson8m2-vpu";
+        reg = <0x100000 0x10000>;
+        reg-names = "vpu";
+        interrupts = <3>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+        amlogic,canvas = <&canvas>;
+        amlogic,hhi-sysctrl = <&hhi>;
+
+        clocks = <&clkc CLKID_VPU_INTR>,
+                 <&clkc CLKID_HDMI_INTR_SYNC>,
+                 <&clkc CLKID_GCLK_VENCI_INT>,
+                 <&clkc CLKID_HDMI_PLL_HDMI_OUT>,
+                 <&clkc CLKID_HDMI_TX_PIXEL>,
+                 <&clkc CLKID_CTS_ENCP>,
+                 <&clkc CLKID_CTS_ENCI>,
+                 <&clkc CLKID_CTS_ENCT>,
+                 <&clkc CLKID_CTS_ENCL>,
+                 <&clkc CLKID_CTS_VDAC0>,
+                 <&clkc CLKID_VID2_PLL>,
+                 <&clkc CLKID_VIID_PLL_PRE_DIV>,
+                 <&clkc CLKID_VIID_PLL_POST_DIV>,
+                 <&clkc CLKID_VIID_PLL>,
+                 <&clkc CLKID_VID2_PLL_FINAL_DIV>,
+                 <&clkc CLKID_VCLK2_IN_SEL>,
+                 <&clkc CLKID_VCLK2_DIV1>,
+                 <&clkc CLKID_CTS_ENCL_SEL>;
+        clock-names = "vpu_intr", "hdmi_intr_sync", "venci_int", "tmds",
+                      "hdmi_tx_pixel", "cts_encp", "cts_enci", "cts_enct",
+                      "cts_encl", "cts_vdac0", "vid2_pll", "viid_pll_pre_div",
+                      "viid_pll_post_div", "viid_pll", "vid2_pll_final_div",
+                      "vclk2_in_sel", "vclk2_div1", "cts_encl_sel";
+
+        resets = <&clkc CLKC_RESET_VID_DIVIDER_CNTL_RESET_N_PRE>,
+                 <&clkc CLKC_RESET_VID_DIVIDER_CNTL_RESET_N_POST>,
+                 <&clkc CLKC_RESET_VID_DIVIDER_CNTL_SOFT_RESET_PRE>,
+                 <&clkc CLKC_RESET_VID_DIVIDER_CNTL_SOFT_RESET_POST>,
+                 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_RESET_N_PRE>,
+                 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_RESET_N_POST>,
+                 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_SOFT_RESET_PRE>,
+                 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_SOFT_RESET_POST>,
+                 <&clkc CLKC_RESET_VIID_CLK_CNTL_SOFT_RESET>;
+        reset-names = "vid_pll_pre", "vid_pll_post", "vid_pll_soft_pre",
+                      "vid_pll_soft_post", "viid_pll_pre", "viid_pll_post",
+                      "viid_pll_soft_pre", "viid_pll_soft_post", "vclk2_soft";
+
+        port@0 {
+            reg = <0>;
+        };
+
+        port@1 {
+            reg = <1>;
+        };
+
+        port@3 {
+            reg = <3>;
+
+            lvds_out: endpoint {
+                remote-endpoint = <&panel_in>;
             };
         };
     };
