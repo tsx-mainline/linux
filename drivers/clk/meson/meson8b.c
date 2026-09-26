@@ -4086,6 +4086,31 @@ static const struct meson8b_clk_reset_line {
 		.bit_idx = 0,
 		.active_low = true,
 	},
+	[CLKC_RESET_VIID_CLK_CNTL_SOFT_RESET] = {
+		.reg = HHI_VIID_CLK_CNTL,
+		.bit_idx = 15,
+		.active_low = false,
+	},
+	[CLKC_RESET_VIID_DIVIDER_CNTL_SOFT_RESET_POST] = {
+		.reg = HHI_VIID_DIVIDER_CNTL,
+		.bit_idx = 7,
+		.active_low = false,
+	},
+	[CLKC_RESET_VIID_DIVIDER_CNTL_SOFT_RESET_PRE] = {
+		.reg = HHI_VIID_DIVIDER_CNTL,
+		.bit_idx = 3,
+		.active_low = false,
+	},
+	[CLKC_RESET_VIID_DIVIDER_CNTL_RESET_N_POST] = {
+		.reg = HHI_VIID_DIVIDER_CNTL,
+		.bit_idx = 1,
+		.active_low = true,
+	},
+	[CLKC_RESET_VIID_DIVIDER_CNTL_RESET_N_PRE] = {
+		.reg = HHI_VIID_DIVIDER_CNTL,
+		.bit_idx = 0,
+		.active_low = true,
+	},
 };
 
 static int meson8b_clk_reset_update(struct reset_controller_dev *rcdev,
