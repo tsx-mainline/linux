@@ -923,9 +923,9 @@ static const char * const i2c_b_groups[] = {
 };
 
 static const char * const i2s_groups[] = {
-	"i2s_out_ch45", "i2s_out_ch23_pins", "i2s_out_ch01_pins",
-	"i2s_in_ch01_pins", "i2s_lr_clk_in_pins", "i2s_ao_clk_in_pins",
-	"i2s_am_clk_pins", "i2s_out_ch78_pins"
+	"i2s_out_ch45", "i2s_out_ch23", "i2s_out_ch01",
+	"i2s_in_ch01", "i2s_lr_clk_in", "i2s_ao_clk_in",
+	"i2s_am_clk", "i2s_out_ch78"
 };
 
 static const char * const sd_c_groups[] = {
