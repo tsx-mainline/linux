@@ -83,6 +83,62 @@
 		};
 	};
 
+	/*
+	 * Front-panel key LEDs (vendor keypad_led node, jbl_kpled driver):
+	 * one enable GPIO per key and one common
+	 * brightness PWM, PWM_C on GPIODV_29 (kpled_ctrl_method = 2, positive
+	 * logic, 366 Hz, duty 0..100 %). A key is lit when its enable is on
+	 * and the brightness is above 0.
+	 * Checked at the panel 2026-09-26 (eyes): the enables are active LOW
+	 * (the vendor "high = on" is inverted by the board), and the vendor
+	 * led1..5 order is bottom to top. Here tsx:key1..5 = top to bottom, the
+	 * same order as the touch keys KEY_F13..KEY_F17.
+	 */
+	keypad-leds {
+		compatible = "gpio-leds";
+
+		led-1 {
+			label = "tsx:key1";
+			gpios = <&gpio GPIOX_11 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+
+		led-2 {
+			label = "tsx:key2";
+			gpios = <&gpio GPIOX_19 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+
+		led-3 {
+			label = "tsx:key3";
+			gpios = <&gpio GPIOX_10 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+
+		led-4 {
+			label = "tsx:key4";
+			gpios = <&gpio GPIOX_17 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+
+		led-5 {
+			label = "tsx:key5";
+			gpios = <&gpio GPIOX_16 GPIO_ACTIVE_LOW>;
+			default-state = "on";
+		};
+	};
+
+	keypad-backlight {
+		compatible = "pwm-leds";
+
+		led-0 {
+			label = "tsx:keypad";
+			/* 366 Hz like the vendor (24 MHz / 65536) */
+			pwms = <&pwm_cd 0 2730000 0>;
+			max-brightness = <255>;
+		};
+	};
+
 	/* U-Boot rewrites this with the real DRAM size */
 	memory@0 {
 		device_type = "memory";
@@ -242,7 +298,12 @@
 	};
 };
 
-/* i2c-1: ambient light sensor MAX44009 at 0x4a (no driver bound) */
+/*
+ * i2c-1: ambient light sensor MAX44009 at 0x4a (no driver bound) and the
+ * Microsemi ZL380xx voice processor at 0x45 (vendor aml_audio_codec
+ * "zl380tw"). 0x0e, 0x34 and 0x36 answer but the vendor DT names no
+ * device there; they are not the front-panel keys (those are touch keys).
+ */
 &i2c_A {
 	status = "okay";
 	pinctrl-0 = <&i2c_a_pins>;
@@ -281,6 +342,71 @@
 		reset-gpios = <&gpio GPIODV_0 GPIO_ACTIVE_LOW>;
 		touchscreen-size-x = <1280>;
 		touchscreen-size-y = <800>;
+
+		/*
+		 * The glass extends to the right of the LCD: five capacitive
+		 * keys in a column at x = 1310..1380 of the touch controller
+		 * (vendor tpkey_1..5, reported by the vendor FocalTech driver
+		 * as KEY_BACK, KEY_HOME, KEY_MUTE, KEY_VOLUMEUP,
+		 * KEY_VOLUMEDOWN). Here the areas are widened by 20 units and
+		 * report KEY_F13..KEY_F17, keys that neither Chromium nor
+		 * the compositor act on; userspace (tsx-buttons) maps them.
+		 * The touchscreen segment drops contacts outside the LCD.
+		 */
+		touch-overlay {
+			segment-screen {
+				label = "screen";
+				x-origin = <0>;
+				x-size = <1280>;
+				y-origin = <0>;
+				y-size = <800>;
+			};
+
+			segment-key1 {
+				label = "key1";
+				linux,code = <KEY_F13>;
+				x-origin = <1290>;
+				x-size = <120>;
+				y-origin = <30>;
+				y-size = <130>;
+			};
+
+			segment-key2 {
+				label = "key2";
+				linux,code = <KEY_F14>;
+				x-origin = <1290>;
+				x-size = <120>;
+				y-origin = <190>;
+				y-size = <130>;
+			};
+
+			segment-key3 {
+				label = "key3";
+				linux,code = <KEY_F15>;
+				x-origin = <1290>;
+				x-size = <120>;
+				y-origin = <330>;
+				y-size = <130>;
+			};
+
+			segment-key4 {
+				label = "key4";
+				linux,code = <KEY_F16>;
+				x-origin = <1290>;
+				x-size = <120>;
+				y-origin = <480>;
+				y-size = <130>;
+			};
+
+			segment-key5 {
+				label = "key5";
+				linux,code = <KEY_F17>;
+				x-origin = <1290>;
+				x-size = <120>;
+				y-origin = <630>;
+				y-size = <130>;
+			};
+		};
 	};
 };
 
@@ -302,12 +428,27 @@
 		};
 	};
 
+	pwm_c_dv29_pins: pwm-c-dv29 {
+		mux {
+			groups = "pwm_c_dv29";
+			function = "pwm_c";
+			bias-disable;
+		};
+	};
+
 	i2c_a_pins: i2c-a {
 		mux {
 			groups = "i2c_sda_a0", "i2c_sck_a0";
 			function = "i2c_a";
 		};
 	};
+};
+
+/* PWM_C: front-panel key LED brightness (GPIODV_29) */
+&pwm_cd {
+	status = "okay";
+	pinctrl-0 = <&pwm_c_dv29_pins>;
+	pinctrl-names = "default";
 };
 
 &saradc {
