@@ -12,6 +12,16 @@ config SND_MESON_AIU
 	  Select Y or M to add support for the Audio output subsystem found
 	  in the Amlogic Meson8, Meson8b and GX SoC families
 
+config SND_MESON_AUDIN
+	tristate "Amlogic Meson8 AUDIN I2S input"
+	depends on SND_MESON_AIU
+	select REGMAP_MMIO
+	help
+	  Select Y or M to add support for the I2S input of the AUDIN block
+	  found in the Amlogic Meson8 and Meson8b SoCs. It captures with the
+	  bit and frame clocks of the AIU I2S encoder, so it is used as a
+	  front-end of a sound card whose back-end is the AIU I2S encoder.
+
 config SND_MESON_AXG_FIFO
 	tristate
 	select REGMAP_MMIO
