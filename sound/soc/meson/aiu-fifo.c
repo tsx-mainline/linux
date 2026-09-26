@@ -6,6 +6,7 @@
 #include <linux/bitfield.h>
 #include <linux/clk.h>
 #include <linux/dma-mapping.h>
+#include <linux/math64.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/soc-dai.h>
@@ -55,18 +56,54 @@ static void aiu_fifo_enable(struct snd_soc_dai *dai, bool enable)
 				      en_mask, enable ? en_mask : 0);
 }
 
+static enum hrtimer_restart aiu_fifo_timer(struct hrtimer *timer)
+{
+	struct aiu_fifo *fifo = container_of(timer, struct aiu_fifo, timer);
+
+	if (!READ_ONCE(fifo->timer_running))
+		return HRTIMER_NORESTART;
+
+	snd_pcm_period_elapsed(fifo->substream);
+
+	if (!READ_ONCE(fifo->timer_running))
+		return HRTIMER_NORESTART;
+
+	hrtimer_forward_now(timer, fifo->timer_interval);
+
+	return HRTIMER_RESTART;
+}
+
+static void aiu_fifo_timer_start(struct aiu_fifo *fifo, bool start)
+{
+	if (!fifo->period_timer)
+		return;
+
+	WRITE_ONCE(fifo->timer_running, start);
+
+	/* atomic context: a running callback sees timer_running and stops */
+	if (start)
+		hrtimer_start(&fifo->timer, fifo->timer_interval,
+			      HRTIMER_MODE_REL);
+	else
+		hrtimer_try_to_cancel(&fifo->timer);
+}
+
 int aiu_fifo_trigger(struct snd_pcm_substream *substream, int cmd,
 		     struct snd_soc_dai *dai)
 {
+	struct aiu_fifo *fifo = snd_soc_dai_dma_data_get_playback(dai);
+
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
 		aiu_fifo_enable(dai, true);
+		aiu_fifo_timer_start(fifo, true);
 		break;
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 	case SNDRV_PCM_TRIGGER_STOP:
+		aiu_fifo_timer_start(fifo, false);
 		aiu_fifo_enable(dai, false);
 		break;
 	default:
@@ -109,6 +146,16 @@ int aiu_fifo_hw_params(struct snd_pcm_substream *substream,
 				runtime->dma_addr);
 	snd_soc_component_write(component, fifo->mem_offset + AIU_MEM_END,
 				end);
+
+	/*
+	 * Poll twice per period: the position is read from the hardware, the
+	 * timer only paces the period wake-ups.
+	 */
+	if (fifo->period_timer)
+		fifo->timer_interval =
+			max_t(u64, 1000000ULL,
+			      div_u64((u64)params_period_size(params) *
+				      NSEC_PER_SEC, 2 * params_rate(params)));
 
 	/* Setup the fifo to read all the memory - no skip */
 	snd_soc_component_update_bits(component,
@@ -157,6 +204,12 @@ int aiu_fifo_startup(struct snd_pcm_substream *substream,
 	if (ret)
 		return ret;
 
+	if (fifo->period_timer) {
+		fifo->substream = substream;
+		hrtimer_setup(&fifo->timer, aiu_fifo_timer, CLOCK_MONOTONIC,
+			      HRTIMER_MODE_REL);
+	}
+
 	ret = request_irq(fifo->irq, aiu_fifo_isr, 0, dev_name(dai->dev),
 			  substream);
 	if (ret)
@@ -169,6 +222,11 @@ void aiu_fifo_shutdown(struct snd_pcm_substream *substream,
 		       struct snd_soc_dai *dai)
 {
 	struct aiu_fifo *fifo = snd_soc_dai_dma_data_get_playback(dai);
+
+	if (fifo->period_timer) {
+		WRITE_ONCE(fifo->timer_running, false);
+		hrtimer_cancel(&fifo->timer);
+	}
 
 	free_irq(fifo->irq, substream);
 	clk_disable_unprepare(fifo->pclk);

@@ -168,6 +168,7 @@ int aiu_fifo_i2s_dai_probe(struct snd_soc_dai *dai)
 	fifo->fifo_block = AIU_FIFO_I2S_BLOCK;
 	fifo->pclk = aiu->i2s.clks[PCLK].clk;
 	fifo->irq = aiu->i2s.irq;
+	fifo->period_timer = aiu->platform->i2s_fifo_irq_per_buffer;
 
 	return 0;
 }
