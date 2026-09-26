@@ -596,6 +596,21 @@
 		reg = <0x8758 0x1c>;
 	};
 
+	/* AUDIN (I2S input FIFO0), clocked by the AIU I2S encoder */
+	audin: audio-controller@a000 {
+		compatible = "amlogic,meson8-audin";
+		reg = <0xa000 0x300>;
+		/* INT_AUDIO_IN; the driver polls, the trigger type is unverified */
+		interrupts = <GIC_SPI 7 IRQ_TYPE_EDGE_RISING>;
+		/* vendor gates AUD_IN (HHI_GCLK_MPEG1 bit 2) and AIU_ADC (bit 13) */
+		clocks = <&clkc CLKID_I2S_SPDIF>, <&clkc CLKID_ADC>;
+		clock-names = "pclk", "adc";
+		resets = <&reset RESET_AUDIN>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "AUDIN";
+		status = "disabled";
+	};
+
 	pinctrl_cbus: pinctrl@8030 {
 		compatible = "amlogic,meson8-cbus-pinctrl";
 		#address-cells = <1>;
@@ -702,6 +717,14 @@
 					"sdxc_d47_c";
 				function = "sdxc_c";
 				bias-pull-up;
+			};
+		};
+
+		i2s_in_ch01_pins: i2s-in-ch01 {
+			mux {
+				groups = "i2s_in_ch01";
+				function = "i2s";
+				bias-disable;
 			};
 		};
 
