@@ -15,7 +15,9 @@
  *   2 digital mics (DigMicCfg 0x0006 = MIC2 + MIC3) -> ZL AEC (Sin MIC3,
  *   Sin2 MIC2, Rin = TDMB-2 input)
  *     -> AEC Sout on TDMA-1 and TDMA-2 (0x0214/0x0216 = 0x0E) -> GPIOY_5
- *        (I2S_IN ch01) -> AUDIN (capture, not in this file yet)
+ *        (I2S_IN ch01) -> AUDIN FIFO0 (capture front-end; the bit and frame
+ *        clocks come from the AIU encoder, which is why the capture goes
+ *        through the same back-end link as the playback)
  *
  * Speaker enable: the vendor "mute_gpio" GPIO_BSD_EN, driven high by the
  * DAPM speaker widget after power-up and low before power-down (aml_m8.c
@@ -45,13 +47,16 @@
 		audio-routing = "Speaker Amp INL", "Left OUT",
 				"Speaker Amp INR", "Right OUT",
 				"Speakers", "Speaker Amp OUTL",
-				"Speakers", "Speaker Amp OUTR";
+				"Speakers", "Speaker Amp OUTR",
+				"AUDIN FIFO0 Capture", "AIU I2S Encoder Capture";
 
 		/*
 		 * The whole card runs at 48 kHz (MCLK 256 fs = 12.288 MHz from
 		 * MPLL0, as the vendor kernel: CTS_AMCLK measured 12 MHz). MPLL2
 		 * is left alone: it is an Ethernet clock input on Meson8m2.
 		 */
+		clocks = <&clkc CLKID_MPLL0>,
+			 <&clkc CLKID_MPLL1>;
 		assigned-clocks = <&clkc CLKID_MPLL0>,
 				  <&clkc CLKID_MPLL1>;
 		assigned-clock-rates = <294912000>,
@@ -61,7 +66,12 @@
 			sound-dai = <&aiu AIU_CPU CPU_I2S_FIFO>;
 		};
 
+		/* capture front-end: AUDIN FIFO0 */
 		dai-link-1 {
+			sound-dai = <&audin>;
+		};
+
+		dai-link-2 {
 			sound-dai = <&aiu AIU_CPU CPU_I2S_ENCODER>;
 			dai-format = "i2s";
 			mclk-fs = <256>;
@@ -92,6 +102,14 @@
 	pinctrl-0 = <&i2s_am_clk_pins>, <&i2s_out_ao_clk_pins>,
 		    <&i2s_out_lr_clk_pins>, <&i2s_out_ch01_ao_pins>;
 	pinctrl-names = "default";
+};
+
+&audin {
+	status = "okay";
+	pinctrl-0 = <&i2s_in_ch01_pins>;
+	pinctrl-names = "default";
+	/* vendor aml_m8.c: CPU DAI format IB_NF for the zl380tw -> POS_SYNC */
+	amlogic,i2s-pos-sync;
 };
 
 &i2c_A {
