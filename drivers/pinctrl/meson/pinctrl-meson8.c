@@ -6,6 +6,9 @@
  */
 
 #include <dt-bindings/gpio/meson8-gpio.h>
+#include <linux/mfd/syscon.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
 #include "pinctrl-meson.h"
 #include "pinctrl-meson8-pmx.h"
 
@@ -1079,6 +1082,207 @@ static const struct meson_bank meson8_aobus_banks[] = {
 	BANK("AO",   GPIOAO_0, GPIO_TEST_N, 0, 13, 0, 16,  0,  0,  0,  0,  0, 16,  1,  0),
 };
 
+/*
+ * GPIO_BSD_EN is numbered in the AO bank, but none of its bits are in the AO
+ * GPIO registers (the vendor kernel, arch/arm/mach-meson8/gpio.c, drives it
+ * as follows and has no input path for it):
+ *  - CBUS PREG_PAD_GPIO0_O bit 29 is cleared and bit 30 is the output enable
+ *    (active low),
+ *  - AO_SECURE_REG0 bit 0 is set (output enable, shared with GPIO_TEST_N),
+ *  - the output value is PREG_PAD_GPIO0_O bit 31 on Meson8, but
+ *    PAD_PULL_UP_REG2 bit 0 on Meson8m2. On Meson8m2 that bit used to be the
+ *    BOOT_0 pull direction, which the vendor pinctrl therefore never writes
+ *    there (see meson8m2_cbus_pull_dir_writable()).
+ * PREG_PAD_GPIO0_O and PAD_PULL_UP_REG2 belong to the CBUS pin controller,
+ * whose "gpio" and "pull" regmaps are borrowed once it has probed.
+ */
+#define MESON8_GPIO0_O			0x04	/* CBUS "gpio" regmap */
+#define  MESON8_GPIO0_O_BSD_EN_29	BIT(29)
+#define  MESON8_GPIO0_O_BSD_EN_OEN	BIT(30)
+#define  MESON8_GPIO0_O_BSD_EN_OUT	BIT(31)
+#define MESON8M2_PULL_UP_REG2		0x08	/* CBUS "pull" regmap */
+#define  MESON8M2_PULL_UP_REG2_BSD_EN_OUT	BIT(0)
+#define MESON8_AO_SECURE_REG0		0x00	/* secbus2 syscon */
+#define  MESON8_AO_SECURE_REG0_OE	BIT(0)
+
+struct meson8_bsd_en {
+	bool out_in_pull_reg;		/* Meson8m2 */
+	struct regmap *secbus2;
+	struct regmap *cbus_gpio;
+	struct regmap *cbus_pull;
+};
+
+static bool meson8m2_cbus_pull_dir_writable(struct meson_pinctrl *pc,
+					    unsigned int pin)
+{
+	/* the BOOT_0 pull direction bit is the GPIO_BSD_EN output on Meson8m2 */
+	return pin != BOOT_0;
+}
+
+/*
+ * Find the regmaps of the CBUS pin controller. Only looks things up (no
+ * allocation, no sleeping lock), so it may run from the GPIO callbacks.
+ */
+static int meson8_bsd_en_get_cbus(struct meson8_bsd_en *bsd)
+{
+	struct platform_device *pdev;
+	struct device_node *np;
+	struct regmap *gpio, *pull;
+
+	if (READ_ONCE(bsd->cbus_pull))
+		return 0;
+
+	np = of_find_compatible_node(NULL, NULL, "amlogic,meson8-cbus-pinctrl");
+	if (!np)
+		return -ENODEV;
+	pdev = of_find_device_by_node(np);
+	of_node_put(np);
+	if (!pdev)
+		return -EPROBE_DEFER;
+
+	/* regmap names are "<gpio node name>-<reg-names>", see pinctrl-meson.c */
+	gpio = dev_get_regmap(&pdev->dev, "bank-gpio");
+	pull = dev_get_regmap(&pdev->dev, "bank-pull");
+	/* the reference is kept: the regmaps live as long as that device */
+	if (!gpio || !pull) {
+		put_device(&pdev->dev);
+		return -EPROBE_DEFER;
+	}
+
+	WRITE_ONCE(bsd->cbus_gpio, gpio);
+	WRITE_ONCE(bsd->cbus_pull, pull);
+
+	return 0;
+}
+
+static int meson8_bsd_en_set_bit(struct meson_pinctrl *pc, unsigned int pin,
+				 enum meson_reg_type reg_type, bool arg)
+{
+	struct meson8_bsd_en *bsd = pc->priv;
+	int ret;
+
+	if (pin != GPIO_BSD_EN)
+		return -EOPNOTSUPP;
+	if (!bsd || !bsd->secbus2)
+		return -ENODEV;
+
+	ret = meson8_bsd_en_get_cbus(bsd);
+	if (ret)
+		return ret;
+
+	switch (reg_type) {
+	case MESON_REG_DIR:
+		/* arg: true = input (output driver off) */
+		if (arg)
+			return regmap_set_bits(bsd->cbus_gpio, MESON8_GPIO0_O,
+					       MESON8_GPIO0_O_BSD_EN_OEN);
+
+		ret = regmap_clear_bits(bsd->cbus_gpio, MESON8_GPIO0_O,
+					MESON8_GPIO0_O_BSD_EN_29);
+		if (ret)
+			return ret;
+		ret = regmap_set_bits(bsd->secbus2, MESON8_AO_SECURE_REG0,
+				      MESON8_AO_SECURE_REG0_OE);
+		if (ret)
+			return ret;
+		return regmap_clear_bits(bsd->cbus_gpio, MESON8_GPIO0_O,
+					 MESON8_GPIO0_O_BSD_EN_OEN);
+
+	case MESON_REG_OUT:
+		if (bsd->out_in_pull_reg)
+			return regmap_assign_bits(bsd->cbus_pull,
+						  MESON8M2_PULL_UP_REG2,
+						  MESON8M2_PULL_UP_REG2_BSD_EN_OUT,
+						  arg);
+		return regmap_assign_bits(bsd->cbus_gpio, MESON8_GPIO0_O,
+					  MESON8_GPIO0_O_BSD_EN_OUT, arg);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int meson8_bsd_en_get_bit(struct meson_pinctrl *pc, unsigned int pin,
+				 enum meson_reg_type reg_type)
+{
+	struct meson8_bsd_en *bsd = pc->priv;
+	unsigned int val;
+	int ret;
+
+	if (pin != GPIO_BSD_EN)
+		return -EOPNOTSUPP;
+	if (!bsd || !bsd->secbus2)
+		return -ENODEV;
+
+	ret = meson8_bsd_en_get_cbus(bsd);
+	if (ret)
+		return ret;
+
+	switch (reg_type) {
+	case MESON_REG_DIR:
+		ret = regmap_read(bsd->cbus_gpio, MESON8_GPIO0_O, &val);
+		if (ret)
+			return ret;
+		return !!(val & MESON8_GPIO0_O_BSD_EN_OEN);
+
+	case MESON_REG_OUT:
+	case MESON_REG_IN:
+		/* there is no input path: report the output latch */
+		if (bsd->out_in_pull_reg) {
+			ret = regmap_read(bsd->cbus_pull, MESON8M2_PULL_UP_REG2,
+					  &val);
+			if (ret)
+				return ret;
+			return !!(val & MESON8M2_PULL_UP_REG2_BSD_EN_OUT);
+		}
+		ret = regmap_read(bsd->cbus_gpio, MESON8_GPIO0_O, &val);
+		if (ret)
+			return ret;
+		return !!(val & MESON8_GPIO0_O_BSD_EN_OUT);
+
+	default:
+		return -EINVAL;
+	}
+}
+
+static int meson8_aobus_init_bsd_en(struct meson_pinctrl *pc,
+				    bool out_in_pull_reg)
+{
+	struct meson8_bsd_en *bsd;
+	int ret;
+
+	ret = meson8_aobus_parse_dt_extra(pc);
+	if (ret)
+		return ret;
+
+	bsd = devm_kzalloc(pc->dev, sizeof(*bsd), GFP_KERNEL);
+	if (!bsd)
+		return -ENOMEM;
+
+	bsd->out_in_pull_reg = out_in_pull_reg;
+	bsd->secbus2 = syscon_regmap_lookup_by_compatible("amlogic,meson8-secbus2");
+	if (IS_ERR(bsd->secbus2)) {
+		/* not fatal: only GPIO_BSD_EN is unavailable */
+		dev_warn(pc->dev, "no secbus2 syscon, GPIO_BSD_EN disabled: %pe\n",
+			 bsd->secbus2);
+		bsd->secbus2 = NULL;
+	}
+
+	pc->priv = bsd;
+
+	return 0;
+}
+
+static int meson8_aobus_parse_dt(struct meson_pinctrl *pc)
+{
+	return meson8_aobus_init_bsd_en(pc, false);
+}
+
+static int meson8m2_aobus_parse_dt(struct meson_pinctrl *pc)
+{
+	return meson8_aobus_init_bsd_en(pc, true);
+}
+
 static const struct meson_pinctrl_data meson8_cbus_pinctrl_data = {
 	.name		= "cbus-banks",
 	.pins		= meson8_cbus_pins,
@@ -1092,6 +1296,20 @@ static const struct meson_pinctrl_data meson8_cbus_pinctrl_data = {
 	.pmx_ops	= &meson8_pmx_ops,
 };
 
+static const struct meson_pinctrl_data meson8m2_cbus_pinctrl_data = {
+	.name		= "cbus-banks",
+	.pins		= meson8_cbus_pins,
+	.groups		= meson8_cbus_groups,
+	.funcs		= meson8_cbus_functions,
+	.banks		= meson8_cbus_banks,
+	.num_pins	= ARRAY_SIZE(meson8_cbus_pins),
+	.num_groups	= ARRAY_SIZE(meson8_cbus_groups),
+	.num_funcs	= ARRAY_SIZE(meson8_cbus_functions),
+	.num_banks	= ARRAY_SIZE(meson8_cbus_banks),
+	.pmx_ops	= &meson8_pmx_ops,
+	.pull_dir_writable = meson8m2_cbus_pull_dir_writable,
+};
+
 static const struct meson_pinctrl_data meson8_aobus_pinctrl_data = {
 	.name		= "ao-bank",
 	.pins		= meson8_aobus_pins,
@@ -1103,7 +1321,25 @@ static const struct meson_pinctrl_data meson8_aobus_pinctrl_data = {
 	.num_funcs	= ARRAY_SIZE(meson8_aobus_functions),
 	.num_banks	= ARRAY_SIZE(meson8_aobus_banks),
 	.pmx_ops	= &meson8_pmx_ops,
-	.parse_dt	= &meson8_aobus_parse_dt_extra,
+	.parse_dt	= meson8_aobus_parse_dt,
+	.gpio_set_bit	= meson8_bsd_en_set_bit,
+	.gpio_get_bit	= meson8_bsd_en_get_bit,
+};
+
+static const struct meson_pinctrl_data meson8m2_aobus_pinctrl_data = {
+	.name		= "ao-bank",
+	.pins		= meson8_aobus_pins,
+	.groups		= meson8_aobus_groups,
+	.funcs		= meson8_aobus_functions,
+	.banks		= meson8_aobus_banks,
+	.num_pins	= ARRAY_SIZE(meson8_aobus_pins),
+	.num_groups	= ARRAY_SIZE(meson8_aobus_groups),
+	.num_funcs	= ARRAY_SIZE(meson8_aobus_functions),
+	.num_banks	= ARRAY_SIZE(meson8_aobus_banks),
+	.pmx_ops	= &meson8_pmx_ops,
+	.parse_dt	= meson8m2_aobus_parse_dt,
+	.gpio_set_bit	= meson8_bsd_en_set_bit,
+	.gpio_get_bit	= meson8_bsd_en_get_bit,
 };
 
 static const struct of_device_id meson8_pinctrl_dt_match[] = {
@@ -1117,11 +1353,11 @@ static const struct of_device_id meson8_pinctrl_dt_match[] = {
 	},
 	{
 		.compatible = "amlogic,meson8m2-cbus-pinctrl",
-		.data = &meson8_cbus_pinctrl_data,
+		.data = &meson8m2_cbus_pinctrl_data,
 	},
 	{
 		.compatible = "amlogic,meson8m2-aobus-pinctrl",
-		.data = &meson8_aobus_pinctrl_data,
+		.data = &meson8m2_aobus_pinctrl_data,
 	},
 	{ },
 };
