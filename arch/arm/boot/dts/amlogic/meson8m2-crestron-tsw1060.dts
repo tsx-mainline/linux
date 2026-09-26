@@ -307,7 +307,7 @@
  *         its firmware + config from its own SPI flash (vendor zls38051.h:
  *         ZL380XX_TW_UPDATE_FIRMWARE undefined)
  *   0x4a  Maxim MAX44009 ambient light sensor, INT on GPIOX_7
- * Audio (TFA9890, ZLS38051, AIU) is not described yet.
+ * Audio (TFA9890, ZLS38051, AIU): meson8m2-crestron-tsw1060-audio.dtsi.
  */
 &i2c_A {
 	status = "okay";
@@ -571,3 +571,6 @@
 		remote-endpoint = <&panel_in>;
 	};
 };
+
+/* Audio: AIU I2S -> ZLS38051 -> 2x TFA9890 */
+#include "meson8m2-crestron-tsw1060-audio.dtsi"
