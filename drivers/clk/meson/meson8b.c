@@ -1510,7 +1510,7 @@ static struct clk_regmap meson8b_vclk2_in_en = {
 
 static struct clk_regmap meson8b_vclk2_en = {
 	.data = &(struct clk_regmap_gate_data){
-		.offset = HHI_VIID_CLK_DIV,
+		.offset = HHI_VIID_CLK_CNTL,
 		.bit_idx = 19,
 	},
 	.hw.init = &(struct clk_init_data){
@@ -1526,7 +1526,7 @@ static struct clk_regmap meson8b_vclk2_en = {
 
 static struct clk_regmap meson8b_vclk2_div1 = {
 	.data = &(struct clk_regmap_gate_data){
-		.offset = HHI_VIID_CLK_DIV,
+		.offset = HHI_VIID_CLK_CNTL,
 		.bit_idx = 0,
 	},
 	.hw.init = &(struct clk_init_data){
@@ -1556,7 +1556,7 @@ static struct clk_fixed_factor meson8b_vclk2_div2_div = {
 
 static struct clk_regmap meson8b_vclk2_div2 = {
 	.data = &(struct clk_regmap_gate_data){
-		.offset = HHI_VIID_CLK_DIV,
+		.offset = HHI_VIID_CLK_CNTL,
 		.bit_idx = 1,
 	},
 	.hw.init = &(struct clk_init_data){
@@ -1586,7 +1586,7 @@ static struct clk_fixed_factor meson8b_vclk2_div4_div = {
 
 static struct clk_regmap meson8b_vclk2_div4 = {
 	.data = &(struct clk_regmap_gate_data){
-		.offset = HHI_VIID_CLK_DIV,
+		.offset = HHI_VIID_CLK_CNTL,
 		.bit_idx = 2,
 	},
 	.hw.init = &(struct clk_init_data){
@@ -1616,7 +1616,7 @@ static struct clk_fixed_factor meson8b_vclk2_div6_div = {
 
 static struct clk_regmap meson8b_vclk2_div6 = {
 	.data = &(struct clk_regmap_gate_data){
-		.offset = HHI_VIID_CLK_DIV,
+		.offset = HHI_VIID_CLK_CNTL,
 		.bit_idx = 3,
 	},
 	.hw.init = &(struct clk_init_data){
@@ -1646,7 +1646,7 @@ static struct clk_fixed_factor meson8b_vclk2_div12_div = {
 
 static struct clk_regmap meson8b_vclk2_div12 = {
 	.data = &(struct clk_regmap_gate_data){
-		.offset = HHI_VIID_CLK_DIV,
+		.offset = HHI_VIID_CLK_CNTL,
 		.bit_idx = 4,
 	},
 	.hw.init = &(struct clk_init_data){
