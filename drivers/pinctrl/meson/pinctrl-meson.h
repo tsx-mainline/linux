@@ -120,6 +120,20 @@ struct meson_pinctrl_data {
 	const struct pinmux_ops *pmx_ops;
 	const void *pmx_data;
 	int (*parse_dt)(struct meson_pinctrl *pc);
+	/*
+	 * Optional hooks for pins whose direction/output/input bits are not
+	 * described by a bank. They return -EOPNOTSUPP for every pin they do
+	 * not handle, which falls back to the bank description.
+	 */
+	int (*gpio_set_bit)(struct meson_pinctrl *pc, unsigned int pin,
+			    enum meson_reg_type reg_type, bool arg);
+	int (*gpio_get_bit)(struct meson_pinctrl *pc, unsigned int pin,
+			    enum meson_reg_type reg_type);
+	/*
+	 * Optional: return false for pins whose pull direction bit must not be
+	 * written (the bit has a different function on this SoC).
+	 */
+	bool (*pull_dir_writable)(struct meson_pinctrl *pc, unsigned int pin);
 };
 
 struct meson_pinctrl {
@@ -134,6 +148,7 @@ struct meson_pinctrl {
 	struct regmap *reg_ds;
 	struct gpio_chip chip;
 	struct fwnode_handle *fwnode;
+	void *priv;
 };
 
 #define FUNCTION(fn)							\
