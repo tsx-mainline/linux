@@ -79,6 +79,9 @@ static int meson8_pmx_set_mux(struct pinctrl_dev *pcdev, unsigned func_num,
 					 BIT(pmx_data->bit),
 					 BIT(pmx_data->bit));
 
+	if (!ret && func_num && pc->data->set_mux_hook)
+		ret = pc->data->set_mux_hook(pc, group_num);
+
 	return ret;
 }
 
