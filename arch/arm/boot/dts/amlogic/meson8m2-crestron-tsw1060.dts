@@ -2,9 +2,10 @@
 /*
  * Crestron TSW-1060 (board "yushan_one", 10-inch 1280x800 LVDS panel).
  *
- * The display is not driven by drm/meson yet: the kernel adopts the
- * boot-logo framebuffer that U-Boot left scanning out (simple-framebuffer).
- * The framebuffer node holds the clocks and the power domain of that
+ * The panel is driven by drm/meson (VPU LVDS output, panel-lvds). Until
+ * drm/meson binds, the console uses the boot-logo framebuffer that U-Boot
+ * left scanning out (simple-framebuffer); drm/meson removes it when it
+ * binds. The framebuffer node holds the clocks and the power domain of that
  * pipeline so they are not turned off at late_initcall.
  *
  * Vendor references: yushan_one_10inch.dtd (Amlogic 3.10 kernel), where
@@ -126,6 +127,88 @@
 		regulator-min-microvolt = <3300000>;
 		regulator-max-microvolt = <3300000>;
 	};
+
+	/*
+	 * LVDS panel: 10.1-inch 1280x800, single link, 8 bit, VESA mapping.
+	 * Timings from the vendor lcd_LP097X02 node (yushan_one_10inch.dtd) and the
+	 * live vendor driver: total 1360x835, 68.136 MHz, hsync 20/30 (high),
+	 * vsync 2/4 (low).
+	 *
+	 * Panel power, vendor yushan_one_10inch.dtd:
+	 *   on:  GPIODV_22=0 (10 ms), GPIODV_23=0 (20 ms), GPIODV_8=0 (150 ms),
+	 *        GPIODV_8=1 (20 ms), LVDS signal on (10 ms), then backlight
+	 *   off: LVDS signal off (20 ms), GPIODV_8=0 (120 ms), GPIODV_23=1 (10 ms),
+	 *        GPIODV_22=1 (100 ms)
+	 * Modelled as a chain of fixed regulators: enabling the last one enables its
+	 * supplies first and waits each startup delay. GPIODV_8 is low while
+	 * GPIODV_23 settles, so its 150 ms low time is part of the GPIODV_23 delay.
+	 * The 20/120/10 ms power-off gaps have no regulator-fixed equivalent; only
+	 * the 100 ms before the next power-on is kept (off-on-delay-us).
+	 * No regulator-boot-on: the regulators switch the panel off when they probe,
+	 * so the panel always gets the full power-on sequence.
+	 */
+	panel_vdd: regulator-panel-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "LCD_PWR_DV22";
+		gpio = <&gpio GPIODV_22 GPIO_ACTIVE_LOW>;
+		startup-delay-us = <10000>;
+		off-on-delay-us = <100000>;
+	};
+
+	panel_vdd2: regulator-panel-vdd2 {
+		compatible = "regulator-fixed";
+		regulator-name = "LCD_PWR_DV23";
+		gpio = <&gpio GPIODV_23 GPIO_ACTIVE_LOW>;
+		vin-supply = <&panel_vdd>;
+		startup-delay-us = <170000>;	/* 20 ms + GPIODV_8 low 150 ms */
+	};
+
+	panel_pwr: regulator-panel-en {
+		compatible = "regulator-fixed";
+		regulator-name = "LCD_EN_DV8";
+		gpio = <&gpio GPIODV_8 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&panel_vdd2>;
+		startup-delay-us = <20000>;
+	};
+
+	panel: panel {
+		compatible = "crestron,tsw1060-panel", "panel-lvds";
+		width-mm = <217>;
+		height-mm = <136>;
+		data-mapping = "vesa-24";
+		power-supply = <&panel_pwr>;
+		backlight = <&backlight>;
+
+		panel-timing {
+			clock-frequency = <68136000>;
+			hactive = <1280>;
+			vactive = <800>;
+			hfront-porch = <30>;
+			hsync-len = <20>;
+			hback-porch = <30>;
+			vfront-porch = <29>;
+			vsync-len = <2>;
+			vback-porch = <4>;
+			hsync-active = <1>;
+			vsync-active = <0>;
+		};
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&vpu_lvds_out>;
+			};
+		};
+	};
+};
+
+/*
+ * No CVBS connector on this board. The VPU node references the DAC as its
+ * "cvbs-dac" PHY; left enabled without a PHY driver, fw_devlink holds the VPU
+ * (and so the panel) back until the 10 s deferred probe timeout.
+ */
+&cvbs_dac {
+	status = "disabled";
 };
 
 &ethmac {
@@ -305,7 +388,26 @@
 	status = "okay";
 };
 
-/* keep drm/meson away from the pipeline U-Boot configured */
 &vpu {
-	status = "disabled";
+	status = "okay";
+
+	/*
+	 * meson8.dtsi routes VCLK2 to the VID PLL; the LVDS pixel clock needs
+	 * the VID2 PLL path: VIID post divider (/7) -> XD -> VCLK2 -> ENCL.
+	 * The driver sets the same parents again before each modeset.
+	 */
+	assigned-clocks = <&clkc CLKID_VCLK_IN_SEL>,
+			  <&clkc CLKID_VCLK2_IN_SEL>,
+			  <&clkc CLKID_VIID_PLL>,
+			  <&clkc CLKID_CTS_ENCL_SEL>;
+	assigned-clock-parents = <&clkc CLKID_VID_PLL_FINAL_DIV>,
+				 <&clkc CLKID_VID2_PLL_FINAL_DIV>,
+				 <&clkc CLKID_VIID_PLL_POST_DIV>,
+				 <&clkc CLKID_VCLK2_DIV1>;
+};
+
+&vpu_lvds_port {
+	vpu_lvds_out: endpoint {
+		remote-endpoint = <&panel_in>;
+	};
 };
