@@ -1,0 +1,132 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Crestron TSW-1060 audio, included at the end of meson8m2-crestron-tsw1060.dts.
+ *
+ * Signal path (vendor evidence: yushan_one_10inch.dtd l.1407-1490, 2249-2253;
+ * device_amlogic_common/audio/zl38051/10inch/ZLS38051_*_with_ver_info.cr2;
+ * audio/tfa9890/settings_yushan_3rd/stereo.ini):
+ *
+ *   AIU I2S out (GPIOAO_8 MCLK, AO_9 BCLK, AO_10 LRCLK, AO_11 DOUT; SoC = clock
+ *   master, 64 BCLK per frame)
+ *     -> ZLS38051 TDMA (I2S-1, clock slave: TdmaClkCfg 0x03F6 = 64 bit, 48 kHz)
+ *        crosspoint in its flash config: TDMB-1/2 <= I2S-1 L/R (0x021C/0x021E)
+ *     -> ZLS38051 TDMB (I2S-2, clock master: TdmbClkCfg 0x83F6)
+ *     -> TFA9890 left (i2c-1 0x34) + TFA9890 right (0x36) -> speakers
+ *   2 digital mics (DigMicCfg 0x0006 = MIC2 + MIC3) -> ZL AEC (Sin MIC3,
+ *   Sin2 MIC2, Rin = TDMB-2 input)
+ *     -> AEC Sout on TDMA-1 and TDMA-2 (0x0214/0x0216 = 0x0E) -> GPIOY_5
+ *        (I2S_IN ch01) -> AUDIN (capture, not in this file yet)
+ *
+ * Speaker enable: the vendor "mute_gpio" GPIO_BSD_EN, driven high by the
+ * DAPM speaker widget after power-up and low before power-down (aml_m8.c
+ * speaker_events). Here the same is done by a simple-audio-amplifier aux
+ * device on the DAPM path behind both TFA9890s, so SPK_EN is only high
+ * while a playback stream runs (plus the 5 s pmdown time).
+ *
+ * The TFA9890s run with their CoolFlux DSP bypassed (mainline tfa989x): no
+ * speaker protection and no volume control. Keep the software volume low
+ * (userland caps "Master" at -6 dB).
+ */
+
+/ {
+	/* GPIO_BSD_EN = vendor "mute_spk" (gpio 134): high = speakers on */
+	speaker_amp: audio-amplifier {
+		compatible = "simple-audio-amplifier";
+		enable-gpios = <&gpio_ao GPIO_BSD_EN GPIO_ACTIVE_HIGH>;
+		sound-name-prefix = "Speaker Amp";
+	};
+
+	sound {
+		compatible = "amlogic,gx-sound-card";
+		model = "TSW-1060";
+
+		audio-aux-devs = <&speaker_amp>;
+		audio-widgets = "Speaker", "Speakers";
+		audio-routing = "Speaker Amp INL", "Left OUT",
+				"Speaker Amp INR", "Right OUT",
+				"Speakers", "Speaker Amp OUTL",
+				"Speakers", "Speaker Amp OUTR";
+
+		/*
+		 * The whole card runs at 48 kHz (MCLK 256 fs = 12.288 MHz from
+		 * MPLL0, as the vendor kernel: CTS_AMCLK measured 12 MHz). MPLL2
+		 * is left alone: it is an Ethernet clock input on Meson8m2.
+		 */
+		assigned-clocks = <&clkc CLKID_MPLL0>,
+				  <&clkc CLKID_MPLL1>;
+		assigned-clock-rates = <294912000>,
+				       <270950400>;
+
+		dai-link-0 {
+			sound-dai = <&aiu AIU_CPU CPU_I2S_FIFO>;
+		};
+
+		dai-link-1 {
+			sound-dai = <&aiu AIU_CPU CPU_I2S_ENCODER>;
+			dai-format = "i2s";
+			mclk-fs = <256>;
+
+			/* the ZL on TDMA ... */
+			codec-0 {
+				sound-dai = <&zl38051>;
+			};
+			/*
+			 * ... and the amplifiers behind it on TDMB. They are not
+			 * on this wire, but listing them here makes ASoC power
+			 * them with the stream and give them the stream rate
+			 * (the ZL TDMB runs at the TDMA rate; vendor I2SSR = 48 kHz
+			 * in stereo.ini).
+			 */
+			codec-1 {
+				sound-dai = <&amp_left>;
+			};
+			codec-2 {
+				sound-dai = <&amp_right>;
+			};
+		};
+	};
+};
+
+&aiu {
+	status = "okay";
+	pinctrl-0 = <&i2s_am_clk_pins>, <&i2s_out_ao_clk_pins>,
+		    <&i2s_out_lr_clk_pins>, <&i2s_out_ch01_ao_pins>;
+	pinctrl-names = "default";
+};
+
+&i2c_A {
+	/*
+	 * NXP TFA9890, mainline tfa989x in DSP-bypass mode. Both take the left
+	 * I2S slot after probe: set "Right Amp Input" to "Right" (tsx-audio).
+	 * VDDD is not software controlled (no vddd-supply: dummy regulator).
+	 */
+	amp_left: audio-codec@34 {
+		compatible = "nxp,tfa9890";
+		reg = <0x34>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Left";
+	};
+
+	amp_right: audio-codec@36 {
+		compatible = "nxp,tfa9890";
+		reg = <0x36>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "Right";
+	};
+
+	/*
+	 * ZLS38051 (vendor zls38051.h: HBI over I2C at 0x45, firmware and
+	 * configuration record from its own flash, ZL380XX_TW_UPDATE_FIRMWARE
+	 * undefined). I2S slave on TDMA (to the SoC), master on TDMB (to the
+	 * amplifiers). No reset GPIO in the vendor DTS.
+	 */
+	zl38051: audio-codec@45 {
+		compatible = "mscc,zl38051";
+		reg = <0x45>;
+		mscc,flash-boot;
+		gpio-controller;
+		#gpio-cells = <2>;
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "ZL";
+	};
+};
