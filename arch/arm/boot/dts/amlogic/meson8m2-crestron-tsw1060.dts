@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Crestron TSW-1060 (board "yushan_one", 10-inch 1280x800 LVDS panel).
+ *
+ * The display is not driven by drm/meson yet: the kernel adopts the
+ * boot-logo framebuffer that U-Boot left scanning out (simple-framebuffer).
+ * The framebuffer node holds the clocks and the power domain of that
+ * pipeline so they are not turned off at late_initcall.
+ *
+ * Vendor references: yushan_one_10inch.dtd (Amlogic 3.10 kernel), where
+ * i2c-0 = I2C_AO, i2c-1 = I2C_A, i2c-2 = I2C_B.
+ */
+
+/dts-v1/;
+
+#include "meson8m2.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	model = "Crestron TSW-1060";
+	compatible = "crestron,tsw1060", "amlogic,meson8m2";
+
+	aliases {
+		ethernet0 = &ethmac;
+		serial0 = &uart_AO;
+		/* same numbering as the vendor kernel */
+		i2c0 = &i2c_AO;
+		i2c1 = &i2c_A;
+		i2c2 = &i2c_B;
+		mmc0 = &sd_card_slot;
+		mmc1 = &sdhc;
+	};
+
+	chosen {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+		stdout-path = "serial0:115200n8";
+
+		/* U-Boot env: fb_addr=0x07900000, 24 bpp, COLOR_INDEX_24_RGB (R at bit 16) */
+		framebuffer@7900000 {
+			compatible = "simple-framebuffer";
+			reg = <0x07900000 (1280 * 800 * 3)>;
+			width = <1280>;
+			height = <800>;
+			stride = <(1280 * 3)>;
+			format = "r8g8b8";
+			/*
+			 * Keep the LVDS pipeline U-Boot set up alive (verified
+			 * without clk_ignore_unused/pd_ignore_unused):
+			 * - cts_encl is required: it holds the whole chain
+			 *   vid2_pll_dco .. viid_pll_lvds_en .. vclk2_div1.
+			 * - the vclk2_vencl/venclmcc and vpu_intr gates are
+			 *   CLK_IGNORE_UNUSED pclks and survive anyway; they are
+			 *   listed so the dependency is explicit.
+			 * - vpu is also held by the pwrc, which marks the VPU
+			 *   domain always-on when U-Boot left it powered.
+			 */
+			clocks = <&clkc CLKID_CTS_ENCL>,
+				 <&clkc CLKID_VIID_PLL_LVDS_EN>,
+				 <&clkc CLKID_VCLK2_VENCL>,
+				 <&clkc CLKID_VCLK2_VENCLMCC>,
+				 <&clkc CLKID_VPU_INTR>,
+				 <&clkc CLKID_VPU>;
+			power-domains = <&pwrc PWRC_MESON8_VPU_ID>;
+			status = "okay";
+		};
+	};
+
+	gpio-keys-polled {
+		compatible = "gpio-keys-polled";
+		poll-interval = <100>;
+
+		/* vendor gpio_keypad: GPIOAO_3, KEY_POWER */
+		button-power {
+			label = "power";
+			linux,code = <KEY_POWER>;
+			gpios = <&gpio_ao GPIOAO_3 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	/* U-Boot rewrites this with the real DRAM size */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x80000000>;
+	};
+
+	reserved-memory {
+		/* U-Boot boot-logo framebuffer, still being scanned out */
+		fb@7900000 {
+			reg = <0x07900000 0x300000>;
+			no-map;
+		};
+
+		/* vendor ramoops (ramoops.mem_address in the U-Boot bootargs) */
+		ramoops@4e00000 {
+			reg = <0x04e00000 0x100000>;
+			no-map;
+		};
+	};
+
+	usb_vbus: regulator-usb-vbus {
+		/* vendor usb_a gpio-vbus-power = "GPIOX_18" ("DWC_OTG", high) */
+		compatible = "regulator-fixed";
+		regulator-name = "USB_VBUS";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		gpio = <&gpio GPIOX_18 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	/* SAR ADC reference (AVDD 1.8 V); fixed placeholder, see pmic@32 */
+	vddio_ao1v8: regulator-vddio-ao1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "VDDIO_AO18";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+	};
+
+	vcc_3v3: regulator-vcc3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "VCC3V3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+};
+
+&ethmac {
+	status = "okay";
+	pinctrl-0 = <&eth_rmii_pins>;
+	pinctrl-names = "default";
+	/* vendor DTS: "meson8m2-rmii-dwmac"; PHY found by scanning the MDIO bus */
+	phy-mode = "rmii";
+};
+
+/* i2c-0: RN5T618 PMIC */
+&i2c_AO {
+	status = "okay";
+	pinctrl-0 = <&i2c_ao_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <100000>;
+
+	pmic@32 {
+		compatible = "ricoh,rn5t618";
+		reg = <0x32>;
+
+		/*
+		 * No "regulators" node on purpose: without init data the
+		 * regulator core registers DCDC1..3, LDO1..5 and LDORTC1/2
+		 * read-only (no voltage, no enable/disable), so every rail stays
+		 * exactly as U-Boot left it. regulator-always-on would switch on
+		 * rails that are off, and leaving it out would let
+		 * regulator_late_cleanup switch off rails nobody claims.
+		 * Fill in names and constraints once the rail map is known.
+		 */
+	};
+};
+
+/* i2c-1: ambient light sensor MAX44009 at 0x4a (no driver bound) */
+&i2c_A {
+	status = "okay";
+	pinctrl-0 = <&i2c_a_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <100000>;
+};
+
+/* i2c-2: backlight driver and touch controller */
+&i2c_B {
+	status = "okay";
+	pinctrl-0 = <&i2c_b_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <100000>;
+
+	/*
+	 * Vendor bl_ctrl_method = 4 (extern) with bl_extern_i2c_mp3309c:
+	 * analog (I2C) dimming, EN on GPIODV_28. The vendor writes
+	 * reg1 = 0x28 (SYNC, OVP 35.5 V), which is also the mainline
+	 * driver default. The vendor never uses dimming steps above 23
+	 * (24 on EDT glass); the mainline driver exposes 0..31.
+	 */
+	backlight: backlight@17 {
+		compatible = "mps,mp3309c";
+		reg = <0x17>;
+		enable-gpios = <&gpio GPIODV_28 GPIO_ACTIVE_HIGH>;
+		default-brightness = <16>;
+	};
+
+	/* vendor touch_ft5x06: irq GPIOX_21, reset GPIODV_0 */
+	touchscreen@38 {
+		compatible = "edt,edt-ft5506";
+		reg = <0x38>;
+		interrupt-parent = <&gpio_intc>;
+		/* gpio_intc numbers the pads globally: GPIOX_21 = 133 */
+		interrupts = <133 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&gpio GPIODV_0 GPIO_ACTIVE_LOW>;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+	};
+};
+
+&pinctrl_cbus {
+	/*
+	 * RMII subset of eth_pins, as the vendor muxes it (PERIPHS_PIN_MUX_6 =
+	 * 0x7de0): GPIOZ_0/1 carry I2C_A and GPIOZ_2/3 carry I2C_B instead of
+	 * the RGMII TXD/RXD2..3 lines. The 50 MHz reference comes in on
+	 * RX_CLK_IN (GPIOZ_8); TX_CLK_50M (GPIOZ_4) is not muxed.
+	 */
+	eth_rmii_pins: ethernet-rmii {
+		mux {
+			groups = "eth_tx_en", "eth_txd1", "eth_txd0",
+				 "eth_rx_clk_in", "eth_rx_dv",
+				 "eth_rxd1", "eth_rxd0",
+				 "eth_mdio", "eth_mdc";
+			function = "ethernet";
+			bias-disable;
+		};
+	};
+
+	i2c_a_pins: i2c-a {
+		mux {
+			groups = "i2c_sda_a0", "i2c_sck_a0";
+			function = "i2c_a";
+		};
+	};
+};
+
+&saradc {
+	status = "okay";
+	vref-supply = <&vddio_ao1v8>;
+};
+
+/* eMMC (Hynix H4G2a, Android mmcblk1): U-Boot, its env, the Android boot image */
+&sdhc {
+	status = "okay";
+	pinctrl-0 = <&sdxc_c_pins>;
+	pinctrl-names = "default";
+	bus-width = <8>;
+	max-frequency = <50000000>;
+	non-removable;
+	disable-wp;
+	cap-mmc-highspeed;
+	no-sd;
+	no-sdio;
+	vmmc-supply = <&vcc_3v3>;
+	vqmmc-supply = <&vcc_3v3>;
+};
+
+/* SD card (MP995, Android mmcblk0) on SDIO port B, CARD_0..5 */
+&sdio {
+	status = "okay";
+	pinctrl-0 = <&sd_b_pins>;
+	pinctrl-names = "default";
+
+	sd_card_slot: slot@1 {
+		compatible = "mmc-slot";
+		reg = <1>;
+		bus-width = <4>;
+		max-frequency = <40000000>;
+		no-mmc;
+		no-sdio;
+		cap-sd-highspeed;
+		disable-wp;
+		/* vendor gpio_cd = "CARD_6", gpio_cd_level = 1: high = inserted */
+		cd-gpios = <&gpio CARD_6 GPIO_ACTIVE_HIGH>;
+		vmmc-supply = <&vcc_3v3>;
+	};
+};
+
+&uart_AO {
+	status = "okay";
+	pinctrl-0 = <&uart_ao_a_pins>;
+	pinctrl-names = "default";
+};
+
+/*
+ * vendor usb_a (lm0, Android bus 2): OTG port, VBUS switch on GPIOX_18.
+ * Port 1 of this root hub is the STM32 that drives the RGB LED bar
+ * (14be:001b, vendor sysfs /sys/devices/lm0/usb2/2-1/2-1:1.1/stm32_io,
+ * leds-crestron-stm32 here). The external USB-A socket is on the same
+ * port: with a stick in the socket neither Android nor mainline sees the
+ * STM32 (serial logs of 2026-09-25), so the two presumably share the port via
+ * a switch on the board. Host mode is forced; the vendor kernel ran it as
+ * OTG with the hardware ID pin, which also ended in host mode.
+ */
+&usb0 {
+	status = "okay";
+	dr_mode = "host";
+	vbus-supply = <&usb_vbus>;
+};
+
+&usb0_phy {
+	status = "okay";
+};
+
+/* vendor usb_b (lm1, Android bus 1): host-only port, nothing attached on the TSW-1060 */
+&usb1 {
+	status = "okay";
+	dr_mode = "host";
+};
+
+&usb1_phy {
+	status = "okay";
+};
+
+/* keep drm/meson away from the pipeline U-Boot configured */
+&vpu {
+	status = "disabled";
+};
