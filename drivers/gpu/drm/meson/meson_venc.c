@@ -50,7 +50,7 @@
  * 1080i interlaced pixels, and was initially designed to encode pixels for
  * VDAC to output RGB ou YUV analog outputs.
  * It's output is only used through the ENCP_DVI encoder for HDMI.
- * The ENCL LVDS encoder is not implemented.
+ * The ENCL LVDS encoder is implemented for Meson8m2 (meson_encoder_lvds.c).
  *
  * The ENCI and ENCP encoders needs specially defined parameters for each
  * supported mode and thus cannot be determined from standard video timings.
@@ -1946,6 +1946,8 @@ void meson_venc_enable_vsync(struct meson_drm *priv)
 {
 	switch (priv->venc.current_mode) {
 	case MESON_VENC_MODE_MIPI_DSI:
+	case MESON_VENC_MODE_LVDS:
+		/* ENCL line reset interrupt, same bit as for ENCP */
 		writel_relaxed(VENC_INTCTRL_ENCP_LNRST_INT_EN,
 			       priv->io_base + _REG(VENC_INTCTRL));
 		break;
