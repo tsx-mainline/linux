@@ -32,6 +32,8 @@ struct aiu_platform_data {
 	bool has_clk_ctrl_more_i2s_div;
 	/* the AUDIN I2S input takes its clocks from the AIU "ADC" divider */
 	bool has_i2s_in_clk;
+	/* the i2s fifo interrupt fires once per buffer, not once per period */
+	bool i2s_fifo_irq_per_buffer;
 };
 
 struct aiu {
