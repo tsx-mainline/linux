@@ -1067,7 +1067,7 @@ static const struct meson_bank meson8_cbus_banks[] = {
 	/*   name    first     last         irq       pullen  pull    dir     out     in  */
 	BANK("X",    GPIOX_0,  GPIOX_21,    112, 133, 4,  0,  4,  0,  0,  0,  1,  0,  2,  0),
 	BANK("Y",    GPIOY_0,  GPIOY_16,    95,  111, 3,  0,  3,  0,  3,  0,  4,  0,  5,  0),
-	BANK("DV",   GPIODV_0, GPIODV_29,   65,   94, 0,  0,  0,  0,  7,  0,  8,  0,  9,  0),
+	BANK("DV",   GPIODV_0, GPIODV_29,   65,   94, 0,  0,  0,  0,  6,  0,  7,  0,  8,  0),
 	BANK("H",    GPIOH_0,  GPIOH_9,     29,   38, 1, 16,  1, 16,  9, 19, 10, 19, 11, 19),
 	BANK("Z",    GPIOZ_0,  GPIOZ_14,    14,   28, 1,  0,  1,  0,  3, 17,  4, 17,  5, 17),
 	BANK("CARD", CARD_0,   CARD_6,      58,   64, 2, 20,  2, 20,  0, 22,  1, 22,  2, 22),
