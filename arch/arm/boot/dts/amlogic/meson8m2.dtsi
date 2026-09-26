@@ -98,6 +98,76 @@
 
 &vpu {
 	compatible = "amlogic,meson8m2-vpu";
+
+	/* the first ten as in meson8.dtsi, then the LVDS (ENCL) clock path */
+	clocks = <&clkc CLKID_VPU_INTR>,
+		 <&clkc CLKID_HDMI_INTR_SYNC>,
+		 <&clkc CLKID_GCLK_VENCI_INT>,
+		 <&clkc CLKID_HDMI_PLL_HDMI_OUT>,
+		 <&clkc CLKID_HDMI_TX_PIXEL>,
+		 <&clkc CLKID_CTS_ENCP>,
+		 <&clkc CLKID_CTS_ENCI>,
+		 <&clkc CLKID_CTS_ENCT>,
+		 <&clkc CLKID_CTS_ENCL>,
+		 <&clkc CLKID_CTS_VDAC0>,
+		 <&clkc CLKID_VID2_PLL>,
+		 <&clkc CLKID_VIID_PLL_PRE_DIV>,
+		 <&clkc CLKID_VIID_PLL_POST_DIV>,
+		 <&clkc CLKID_VIID_PLL>,
+		 <&clkc CLKID_VID2_PLL_FINAL_DIV>,
+		 <&clkc CLKID_VCLK2_IN_SEL>,
+		 <&clkc CLKID_VCLK2_DIV1>,
+		 <&clkc CLKID_CTS_ENCL_SEL>,
+		 <&clkc CLKID_VCLK2_VENCL>,
+		 <&clkc CLKID_EDP>,
+		 <&clkc CLKID_VCLK2_ENCL>;
+	clock-names = "vpu_intr",
+		      "hdmi_intr_sync",
+		      "venci_int",
+		      "tmds",
+		      "hdmi_tx_pixel",
+		      "cts_encp",
+		      "cts_enci",
+		      "cts_enct",
+		      "cts_encl",
+		      "cts_vdac0",
+		      "vid2_pll",
+		      "viid_pll_pre_div",
+		      "viid_pll_post_div",
+		      "viid_pll",
+		      "vid2_pll_final_div",
+		      "vclk2_in_sel",
+		      "vclk2_div1",
+		      "cts_encl_sel",
+		      "vclk2_vencl",
+		      "edp",
+		      "vclk2_encl";
+
+	resets = <&clkc CLKC_RESET_VID_DIVIDER_CNTL_RESET_N_PRE>,
+		 <&clkc CLKC_RESET_VID_DIVIDER_CNTL_RESET_N_POST>,
+		 <&clkc CLKC_RESET_VID_DIVIDER_CNTL_SOFT_RESET_PRE>,
+		 <&clkc CLKC_RESET_VID_DIVIDER_CNTL_SOFT_RESET_POST>,
+		 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_RESET_N_PRE>,
+		 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_RESET_N_POST>,
+		 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_SOFT_RESET_PRE>,
+		 <&clkc CLKC_RESET_VIID_DIVIDER_CNTL_SOFT_RESET_POST>,
+		 <&clkc CLKC_RESET_VIID_CLK_CNTL_SOFT_RESET>;
+	reset-names = "vid_pll_pre",
+		      "vid_pll_post",
+		      "vid_pll_soft_pre",
+		      "vid_pll_soft_post",
+		      "viid_pll_pre",
+		      "viid_pll_post",
+		      "viid_pll_soft_pre",
+		      "viid_pll_soft_post",
+		      "vclk2_soft";
+
+	amlogic,hhi-sysctrl = <&hhi>;
+
+	/* LVDS transmitter output */
+	vpu_lvds_port: port@3 {
+		reg = <3>;
+	};
 };
 
 &wdt {
