@@ -119,6 +119,7 @@ static const struct pll_params_table sys_pll_params_table[] = {
 	PLL_PARAMS(66, 1),
 	PLL_PARAMS(67, 1),
 	PLL_PARAMS(68, 1),
+	PLL_PARAMS(75, 1),
 	PLL_PARAMS(84, 1),
 	{ /* sentinel */ },
 };
@@ -638,12 +639,24 @@ static struct clk_regmap meson8b_sys_pll_dco = {
 	},
 };
 
+/*
+ * OD only divides by 1, 2 or 4. OD = 3 is not a divide by 8: on a
+ * Meson8m2 it measures as a divide by 4, and the vendor kernel never
+ * programs it.
+ */
+static const struct clk_div_table meson8b_sys_pll_od_table[] = {
+	{ .val = 0, .div = 1 },
+	{ .val = 1, .div = 2 },
+	{ .val = 2, .div = 4 },
+	{ /* sentinel */ },
+};
+
 static struct clk_regmap meson8b_sys_pll = {
 	.data = &(struct clk_regmap_div_data){
 		.offset = HHI_SYS_PLL_CNTL,
 		.shift = 16,
 		.width = 2,
-		.flags = CLK_DIVIDER_POWER_OF_TWO,
+		.table = meson8b_sys_pll_od_table,
 	},
 	.hw.init = &(struct clk_init_data){
 		.name = "sys_pll",
