@@ -33,6 +33,7 @@ properties:
       - description: Boards with the Amlogic Meson8m2 SoC
         items:
           - enum:
+              - crestron,tsw1060
               - tronsmart,mxiii-plus
           - const: amlogic,meson8m2
 
