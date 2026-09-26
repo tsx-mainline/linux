@@ -3320,6 +3320,12 @@ static MESON8B_PCLK(meson8b_iec958_gate,	HHI_GCLK_OTHER, 16, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_enc480p,		HHI_GCLK_OTHER, 20, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_rng1,		HHI_GCLK_OTHER, 21, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_gclk_vencl_int,	HHI_GCLK_OTHER, 22, CLK_IGNORE_UNUSED);
+/*
+ * Bit 23 is the ENCL (LVDS/LCD encoder) gate, called VCLK2_ENCL by the vendor
+ * kernel (switch_lcd_mod_gate). Without it the ENCL keeps counting lines but
+ * does not raise its vsync interrupt.
+ */
+static MESON8B_PCLK(meson8b_vclk2_encl,	HHI_GCLK_OTHER, 23, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_vclk2_venclmcc,	HHI_GCLK_OTHER, 24, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_vclk2_vencl,	HHI_GCLK_OTHER, 25, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_vclk2_other,	HHI_GCLK_OTHER, 26, CLK_IGNORE_UNUSED);
@@ -3431,6 +3437,7 @@ static struct clk_hw *meson8_hw_clks[] = {
 	[CLKID_ENC480P]		    = &meson8b_enc480p.hw,
 	[CLKID_RNG1]		    = &meson8b_rng1.hw,
 	[CLKID_GCLK_VENCL_INT]	    = &meson8b_gclk_vencl_int.hw,
+	[CLKID_VCLK2_ENCL]	    = &meson8b_vclk2_encl.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
@@ -3640,6 +3647,7 @@ static struct clk_hw *meson8b_hw_clks[] = {
 	[CLKID_ENC480P]		    = &meson8b_enc480p.hw,
 	[CLKID_RNG1]		    = &meson8b_rng1.hw,
 	[CLKID_GCLK_VENCL_INT]	    = &meson8b_gclk_vencl_int.hw,
+	[CLKID_VCLK2_ENCL]	    = &meson8b_vclk2_encl.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
@@ -3856,6 +3864,7 @@ static struct clk_hw *meson8m2_hw_clks[] = {
 	[CLKID_ENC480P]		    = &meson8b_enc480p.hw,
 	[CLKID_RNG1]		    = &meson8b_rng1.hw,
 	[CLKID_GCLK_VENCL_INT]	    = &meson8b_gclk_vencl_int.hw,
+	[CLKID_VCLK2_ENCL]	    = &meson8b_vclk2_encl.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
