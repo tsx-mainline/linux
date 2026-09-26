@@ -299,16 +299,35 @@
 };
 
 /*
- * i2c-1: ambient light sensor MAX44009 at 0x4a (no driver bound) and the
- * Microsemi ZL380xx voice processor at 0x45 (vendor aml_audio_codec
- * "zl380tw"). 0x0e, 0x34 and 0x36 answer but the vendor DT names no
- * device there; they are not the front-panel keys (those are touch keys).
+ * i2c-1 (vendor i2c_bus_a):
+ *   0x0e  unknown (not in the vendor DT or the Android init scripts)
+ *   0x34  NXP TFA9890 smart amplifier, left speaker   (vendor
+ *   0x36  NXP TFA9890 smart amplifier, right speaker   audio/tfa9890/.../stereo.ini)
+ *   0x45  Microsemi ZLS38051 (ZL380xx "Timberwolf") voice processor; boots
+ *         its firmware + config from its own SPI flash (vendor zls38051.h:
+ *         ZL380XX_TW_UPDATE_FIRMWARE undefined)
+ *   0x4a  Maxim MAX44009 ambient light sensor, INT on GPIOX_7
+ * Audio (TFA9890, ZLS38051, AIU) is not described yet.
  */
 &i2c_A {
 	status = "okay";
 	pinctrl-0 = <&i2c_a_pins>;
 	pinctrl-names = "default";
 	clock-frequency = <100000>;
+
+	/*
+	 * vendor sensor/max44009: address 0x4a, irq GPIOX_7 (vendor gpio 119
+	 * "ls_max44009", input, reads high: external pull-up, open-drain
+	 * active-low INT). gpio_intc numbers the pads globally: GPIOX_7 = 119.
+	 * The mainline driver uses the interrupt only for threshold events;
+	 * reads work without it.
+	 */
+	light-sensor@4a {
+		compatible = "maxim,max44009";
+		reg = <0x4a>;
+		interrupt-parent = <&gpio_intc>;
+		interrupts = <119 IRQ_TYPE_EDGE_FALLING>;
+	};
 };
 
 /* i2c-2: backlight driver and touch controller */
