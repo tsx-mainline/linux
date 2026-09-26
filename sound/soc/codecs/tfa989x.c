@@ -7,12 +7,14 @@
  * Copyright (C) 2013 Sony Mobile Communications Inc.
  */
 
+#include <linux/bitfield.h>
 #include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <sound/soc.h>
+#include <sound/tlv.h>
 
 #define TFA989X_STATUSREG		0x00
 #define TFA989X_BATTERYVOLTAGE		0x01
@@ -25,8 +27,10 @@
 #define TFA989X_I2SREG_CHSA_MSK		GENMASK(7, 6)
 #define TFA989X_I2SREG_I2SSR		12	/* sample rate */
 #define TFA989X_I2SREG_I2SSR_MSK	GENMASK(15, 12)
+#define TFA989X_I2SREG_CHS12_MSK	GENMASK(4, 3)	/* DSP input channel */
 #define TFA989X_BAT_PROT		0x05
 #define TFA989X_AUDIO_CTR		0x06
+#define TFA989X_AUDIO_CTR_VOL		8	/* DSP volume, 0.5 dB steps */
 #define TFA989X_DCDCBOOST		0x07
 #define TFA989X_SPKR_CALIBRATION	0x08
 #define TFA989X_SYS_CTRL		0x09
@@ -37,6 +41,7 @@
 #define TFA989X_SYS_CTRL_DCA		4	/* enable boost */
 #define TFA989X_SYS_CTRL_SBSL		5	/* DSP configured */
 #define TFA989X_SYS_CTRL_AMPC		6	/* amplifier enabled by DSP */
+#define TFA989X_STATUSREG_ACS		BIT(11)	/* cold started */
 #define TFA989X_I2S_SEL_REG		0x0a
 #define TFA989X_I2S_SEL_REG_SPKR_MSK	GENMASK(10, 9)	/* speaker impedance */
 #define TFA989X_I2S_SEL_REG_DCFG_MSK	GENMASK(14, 11)	/* DCDC compensation */
@@ -50,6 +55,19 @@
 #define TFA9890_REVISION		0x80
 #define TFA9895_REVISION		0x12
 #define TFA9897_REVISION		0x97
+
+/*
+ * dsp=1 (default): do not force the CoolFlux DSP into bypass. The DSP is
+ * loaded from userspace (patch, config, speaker model, preset; vendor
+ * container files), so the register cache is disabled to stay coherent with
+ * those writes. Until the DSP reports "configured" (SBSL=1, ACS=0) every
+ * power-up falls back to the bypass setup, so audio behaves as with dsp=0.
+ * Pass dsp=0 (snd_soc_tfa989x.dsp=0) to force plain bypass, e.g. if the
+ * userspace loader is not installed or not wanted.
+ */
+static bool dsp = 1;
+module_param(dsp, bool, 0444);
+MODULE_PARM_DESC(dsp, "Leave the CoolFlux DSP to a userspace loader (default: on; 0 forces bypass)");
 
 struct tfa989x_rev {
 	unsigned int rev;
@@ -81,9 +99,53 @@ static const struct regmap_config tfa989x_regmap = {
 	.cache_type	= REGCACHE_RBTREE,
 };
 
+static const struct regmap_config tfa989x_regmap_nocache = {
+	.reg_bits = 8,
+	.val_bits = 16,
+
+	.writeable_reg	= tfa989x_writeable_reg,
+	.cache_type	= REGCACHE_NONE,
+};
+
 static const char * const chsa_text[] = { "Left", "Right", /* "DSP" */ };
 static SOC_ENUM_SINGLE_DECL(chsa_enum, TFA989X_I2SREG, TFA989X_I2SREG_CHSA, chsa_text);
 static const struct snd_kcontrol_new chsa_mux = SOC_DAPM_ENUM("Amp Input", chsa_enum);
+
+static const char * const chsa_dsp_text[] = { "Left", "Right", "DSP" };
+static SOC_ENUM_SINGLE_DECL(chsa_dsp_enum, TFA989X_I2SREG, TFA989X_I2SREG_CHSA, chsa_dsp_text);
+static const struct snd_kcontrol_new chsa_dsp_mux = SOC_DAPM_ENUM("Amp Input", chsa_dsp_enum);
+
+static int tfa989x_dsp_bypass(struct regmap *regmap, bool per_channel);
+
+static int tfa989x_power_event(struct snd_soc_dapm_widget *w,
+			       struct snd_kcontrol *kcontrol, int event)
+{
+	struct snd_soc_component *component = snd_soc_dapm_to_component(w->dapm);
+	struct regmap *regmap = dev_get_regmap(component->dev, NULL);
+	unsigned int status, sys_ctrl;
+	int ret;
+
+	ret = regmap_read(regmap, TFA989X_STATUSREG, &status);
+	if (!ret)
+		ret = regmap_read(regmap, TFA989X_SYS_CTRL, &sys_ctrl);
+	if (ret)
+		return ret;
+
+	/* DSP configured by the loader and not reset since: use it */
+	if (!(status & TFA989X_STATUSREG_ACS) &&
+	    (sys_ctrl & BIT(TFA989X_SYS_CTRL_SBSL)) &&
+	    (sys_ctrl & BIT(TFA989X_SYS_CTRL_CFE)))
+		return 0;
+
+	/*
+	 * E.g. no loader yet, or the amplifier lost power: never feed an
+	 * unconfigured DSP, play in bypass like dsp=0 would.
+	 */
+	if (sys_ctrl & BIT(TFA989X_SYS_CTRL_CFE))
+		dev_info_once(component->dev, "DSP not configured, using bypass\n");
+
+	return tfa989x_dsp_bypass(regmap, true);
+}
 
 static const struct snd_soc_dapm_widget tfa989x_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("OUT"),
@@ -93,6 +155,35 @@ static const struct snd_soc_dapm_widget tfa989x_dapm_widgets[] = {
 	SND_SOC_DAPM_MUX("Amp Input", SND_SOC_NOPM, 0, 0, &chsa_mux),
 	SND_SOC_DAPM_AIF_IN("AIFINL", "HiFi Playback", 0, SND_SOC_NOPM, 0, 0),
 	SND_SOC_DAPM_AIF_IN("AIFINR", "HiFi Playback", 1, SND_SOC_NOPM, 0, 0),
+};
+
+static const struct snd_soc_dapm_widget tfa989x_dsp_dapm_widgets[] = {
+	SND_SOC_DAPM_OUTPUT("OUT"),
+	SND_SOC_DAPM_SUPPLY("POWER", TFA989X_SYS_CTRL, TFA989X_SYS_CTRL_PWDN, 1,
+			    tfa989x_power_event, SND_SOC_DAPM_PRE_PMU),
+	SND_SOC_DAPM_OUT_DRV("AMPE", TFA989X_SYS_CTRL, TFA989X_SYS_CTRL_AMPE, 0, NULL, 0),
+
+	SND_SOC_DAPM_MUX("Amp Input", SND_SOC_NOPM, 0, 0, &chsa_dsp_mux),
+	SND_SOC_DAPM_AIF_IN("AIFINL", "HiFi Playback", 0, SND_SOC_NOPM, 0, 0),
+	SND_SOC_DAPM_AIF_IN("AIFINR", "HiFi Playback", 1, SND_SOC_NOPM, 0, 0),
+};
+
+static const struct snd_soc_dapm_route tfa989x_dsp_dapm_routes[] = {
+	{"OUT", NULL, "AMPE"},
+	{"AMPE", NULL, "POWER"},
+	{"AMPE", NULL, "Amp Input"},
+	{"Amp Input", "Left", "AIFINL"},
+	{"Amp Input", "Right", "AIFINR"},
+	{"Amp Input", "DSP", "AIFINL"},
+	{"Amp Input", "DSP", "AIFINR"},
+};
+
+/* CoolFlux volume: 0 = 0 dB ... 254 = -127 dB, 255 = mute (inverted) */
+static const DECLARE_TLV_DB_SCALE(tfa989x_dsp_vol_tlv, -12750, 50, 1);
+
+static const struct snd_kcontrol_new tfa989x_dsp_controls[] = {
+	SOC_SINGLE_TLV("DSP Playback Volume", TFA989X_AUDIO_CTR,
+		       TFA989X_AUDIO_CTR_VOL, 255, 1, tfa989x_dsp_vol_tlv),
 };
 
 static const struct snd_soc_dapm_route tfa989x_dapm_routes[] = {
@@ -122,6 +213,32 @@ static const struct snd_kcontrol_new tfa989x_mode_controls[] = {
 static int tfa989x_probe(struct snd_soc_component *component)
 {
 	struct tfa989x *tfa989x = snd_soc_component_get_drvdata(component);
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	int ret;
+
+	if (dsp) {
+		ret = snd_soc_dapm_new_controls(dapm, tfa989x_dsp_dapm_widgets,
+						ARRAY_SIZE(tfa989x_dsp_dapm_widgets));
+		if (ret)
+			return ret;
+		ret = snd_soc_dapm_add_routes(dapm, tfa989x_dsp_dapm_routes,
+					      ARRAY_SIZE(tfa989x_dsp_dapm_routes));
+		if (ret)
+			return ret;
+		ret = snd_soc_add_component_controls(component, tfa989x_dsp_controls,
+						     ARRAY_SIZE(tfa989x_dsp_controls));
+		if (ret)
+			return ret;
+	} else {
+		ret = snd_soc_dapm_new_controls(dapm, tfa989x_dapm_widgets,
+						ARRAY_SIZE(tfa989x_dapm_widgets));
+		if (ret)
+			return ret;
+		ret = snd_soc_dapm_add_routes(dapm, tfa989x_dapm_routes,
+					      ARRAY_SIZE(tfa989x_dapm_routes));
+		if (ret)
+			return ret;
+	}
 
 	if (tfa989x->rev->rev == TFA9897_REVISION)
 		return snd_soc_add_component_controls(component, tfa989x_mode_controls,
@@ -132,10 +249,6 @@ static int tfa989x_probe(struct snd_soc_component *component)
 
 static const struct snd_soc_component_driver tfa989x_component = {
 	.probe			= tfa989x_probe,
-	.dapm_widgets		= tfa989x_dapm_widgets,
-	.num_dapm_widgets	= ARRAY_SIZE(tfa989x_dapm_widgets),
-	.dapm_routes		= tfa989x_dapm_routes,
-	.num_dapm_routes	= ARRAY_SIZE(tfa989x_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
 };
@@ -283,12 +396,26 @@ static const struct tfa989x_rev tfa9897_rev = {
  * Ideally NXP (or now Goodix) should release proper documentation for these
  * amplifiers so that support for the "CoolFlux DSP" can be implemented properly.
  */
-static int tfa989x_dsp_bypass(struct regmap *regmap)
+static int tfa989x_dsp_bypass(struct regmap *regmap, bool per_channel)
 {
+	unsigned int i2sreg, chsa = 0;
 	int ret;
 
-	/* Clear CHSA to bypass DSP and take input from I2S 1 left channel */
-	ret = regmap_clear_bits(regmap, TFA989X_I2SREG, TFA989X_I2SREG_CHSA_MSK);
+	/*
+	 * Clear CHSA to bypass DSP and take input from I2S 1 left channel.
+	 * per_channel: keep an explicit Left/Right choice, and map "DSP"
+	 * to the channel the DSP was told to use (CHS12: 1 = left, 2 = right).
+	 */
+	if (per_channel) {
+		ret = regmap_read(regmap, TFA989X_I2SREG, &i2sreg);
+		if (ret)
+			return ret;
+		chsa = FIELD_GET(TFA989X_I2SREG_CHSA_MSK, i2sreg);
+		if (chsa > 1)
+			chsa = FIELD_GET(TFA989X_I2SREG_CHS12_MSK, i2sreg) == 2;
+	}
+	ret = regmap_update_bits(regmap, TFA989X_I2SREG, TFA989X_I2SREG_CHSA_MSK,
+				 FIELD_PREP(TFA989X_I2SREG_CHSA_MSK, chsa));
 	if (ret)
 		return ret;
 
@@ -347,7 +474,7 @@ static int tfa989x_i2c_probe(struct i2c_client *i2c)
 			return PTR_ERR(tfa989x->rcv_gpiod);
 	}
 
-	regmap = devm_regmap_init_i2c(i2c, &tfa989x_regmap);
+	regmap = devm_regmap_init_i2c(i2c, dsp ? &tfa989x_regmap_nocache : &tfa989x_regmap);
 	if (IS_ERR(regmap))
 		return PTR_ERR(regmap);
 
@@ -392,7 +519,8 @@ static int tfa989x_i2c_probe(struct i2c_client *i2c)
 		return ret;
 	}
 
-	ret = tfa989x_dsp_bypass(regmap);
+	/* with dsp=1 the bypass is applied at each power-up until the DSP is loaded */
+	ret = dsp ? 0 : tfa989x_dsp_bypass(regmap, false);
 	if (ret) {
 		dev_err(dev, "failed to enable DSP bypass: %d\n", ret);
 		return ret;
