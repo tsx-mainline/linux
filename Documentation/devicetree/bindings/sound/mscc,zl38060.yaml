@@ -10,6 +10,8 @@ description: |
   The ZL38060 is a "Connected Home Audio Processor" from Microsemi,
   which consists of a Digital Signal Processor (DSP), several Digital
   Audio Interfaces (DAIs), analog outputs, and a block of 14 GPIOs.
+  The ZL38051 voice processor of the same ("Timberwolf") family has the
+  same host bus interface. Both can be connected over SPI or I2C.
 
 maintainers:
   - Jaroslav Kysela <perex@perex.cz>
@@ -20,12 +22,22 @@ allOf:
 
 properties:
   compatible:
-    const: mscc,zl38060
+    enum:
+      - mscc,zl38051
+      - mscc,zl38060
 
   reg:
     description:
-      SPI device address.
+      SPI chip select or I2C device address.
     maxItems: 1
+
+  mscc,flash-boot:
+    type: boolean
+    description:
+      The device loads its firmware and its configuration record from its
+      own flash memory. The operating system must not load firmware or
+      change the audio routing, clock or DSP configuration; the DAI rate is
+      the one of that configuration.
 
   spi-max-frequency:
     maximum: 24000000
@@ -68,5 +80,21 @@ examples:
             reg = <0>;
             spi-max-frequency = <12000000>;
             reset-gpios = <&gpio1 0 GPIO_ACTIVE_LOW>;
+        };
+    };
+
+  - |
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        audio-codec@45 {
+            compatible = "mscc,zl38051";
+            reg = <0x45>;
+            mscc,flash-boot;
+            gpio-controller;
+            #gpio-cells = <2>;
+            #sound-dai-cells = <0>;
+            sound-name-prefix = "ZL";
         };
     };

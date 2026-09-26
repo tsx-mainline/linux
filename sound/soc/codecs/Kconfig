@@ -2641,13 +2641,16 @@ config SND_SOC_WSA884X
 
 config SND_SOC_ZL38060
 	tristate "Microsemi ZL38060 Connected Home Audio Processor"
-	depends on SPI_MASTER
+	depends on SPI_MASTER || I2C
+	depends on I2C || !I2C
 	depends on GPIOLIB
 	select REGMAP
 	help
 	  Support for ZL38060 Connected Home Audio Processor from Microsemi,
 	  which consists of a Digital Signal Processor (DSP), several Digital
 	  Audio Interfaces (DAIs), analog outputs, and a block of 14 GPIOs.
+	  Also supports the ZL38051 voice processor of the same family, on
+	  SPI or I2C, including chips that boot from their own flash.
 
 # Amp
 config SND_SOC_LM4857
