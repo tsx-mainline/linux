@@ -1104,6 +1104,15 @@ static const struct meson_bank meson8_aobus_banks[] = {
 #define  MESON8M2_PULL_UP_REG2_BSD_EN_OUT	BIT(0)
 #define MESON8_AO_SECURE_REG0		0x00	/* secbus2 syscon */
 #define  MESON8_AO_SECURE_REG0_OE	BIT(0)
+/*
+ * AO_SECURE_REG1 bits 1 and 8 route the JTAG port to GPIOAO_8..11 (vendor
+ * mach-meson8/include/mach/sd.h, aml_jtag_gpioao(): "if using external
+ * codec, jtag should not be set"). While they are set, the JTAG port owns
+ * those pads: neither the pin mux nor the GPIO registers reach them.
+ * Boot firmware (the TSW-1060 U-Boot) leaves them set.
+ */
+#define MESON8_AO_SECURE_REG1		0x04
+#define  MESON8_AO_SECURE_REG1_JTAG_AO	(BIT(1) | BIT(8))
 
 struct meson8_bsd_en {
 	bool out_in_pull_reg;		/* Meson8m2 */
@@ -1245,6 +1254,40 @@ static int meson8_bsd_en_get_bit(struct meson_pinctrl *pc, unsigned int pin,
 	}
 }
 
+/* a function on GPIOAO_8..11 needs the pads back from the JTAG port */
+static int meson8_aobus_set_mux_hook(struct meson_pinctrl *pc,
+				     unsigned int group)
+{
+	const struct meson_pmx_group *grp = &pc->data->groups[group];
+	struct meson8_bsd_en *bsd = pc->priv;
+	unsigned int i, val;
+	int ret;
+
+	for (i = 0; i < grp->num_pins; i++)
+		if (grp->pins[i] >= GPIOAO_8 && grp->pins[i] <= GPIOAO_11)
+			break;
+	if (i == grp->num_pins)
+		return 0;
+
+	if (!bsd || !bsd->secbus2) {
+		dev_warn(pc->dev, "%s: cannot release GPIOAO_8..11 from JTAG (no secbus2)\n",
+			 grp->name);
+		return 0;
+	}
+
+	ret = regmap_read(bsd->secbus2, MESON8_AO_SECURE_REG1, &val);
+	if (ret)
+		return ret;
+	if (!(val & MESON8_AO_SECURE_REG1_JTAG_AO))
+		return 0;
+
+	dev_info(pc->dev, "%s: JTAG released from GPIOAO_8..11 (AO_SECURE_REG1 0x%08x)\n",
+		 grp->name, val);
+
+	return regmap_clear_bits(bsd->secbus2, MESON8_AO_SECURE_REG1,
+				 MESON8_AO_SECURE_REG1_JTAG_AO);
+}
+
 static int meson8_aobus_init_bsd_en(struct meson_pinctrl *pc,
 				    bool out_in_pull_reg)
 {
@@ -1322,6 +1365,7 @@ static const struct meson_pinctrl_data meson8_aobus_pinctrl_data = {
 	.num_banks	= ARRAY_SIZE(meson8_aobus_banks),
 	.pmx_ops	= &meson8_pmx_ops,
 	.parse_dt	= meson8_aobus_parse_dt,
+	.set_mux_hook	= meson8_aobus_set_mux_hook,
 	.gpio_set_bit	= meson8_bsd_en_set_bit,
 	.gpio_get_bit	= meson8_bsd_en_get_bit,
 };
@@ -1338,6 +1382,7 @@ static const struct meson_pinctrl_data meson8m2_aobus_pinctrl_data = {
 	.num_banks	= ARRAY_SIZE(meson8_aobus_banks),
 	.pmx_ops	= &meson8_pmx_ops,
 	.parse_dt	= meson8m2_aobus_parse_dt,
+	.set_mux_hook	= meson8_aobus_set_mux_hook,
 	.gpio_set_bit	= meson8_bsd_en_set_bit,
 	.gpio_get_bit	= meson8_bsd_en_get_bit,
 };

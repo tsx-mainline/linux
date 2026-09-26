@@ -134,6 +134,11 @@ struct meson_pinctrl_data {
 	 * written (the bit has a different function on this SoC).
 	 */
 	bool (*pull_dir_writable)(struct meson_pinctrl *pc, unsigned int pin);
+	/*
+	 * Optional: called after a pin group was switched to a function
+	 * (not GPIO), for SoC-level side effects of that mux setting.
+	 */
+	int (*set_mux_hook)(struct meson_pinctrl *pc, unsigned int group);
 };
 
 struct meson_pinctrl {
