@@ -27,6 +27,7 @@
 	aliases {
 		ethernet0 = &ethmac;
 		serial0 = &uart_AO;
+		serial1 = &uart_A;
 		/* same numbering as the vendor kernel */
 		i2c0 = &i2c_AO;
 		i2c1 = &i2c_A;
@@ -137,6 +138,23 @@
 			pwms = <&pwm_cd 0 2730000 0>;
 			max-brightness = <255>;
 		};
+	};
+
+	/*
+	 * CSR8811 Bluetooth (vendor bt-dev, "amlogic,bt-dev" gpio_reset =
+	 * GPIOY_8). The chip is BCSP over UART A (&uart_A below), not HCI
+	 * H4/H5, and needs a PSR upload from userspace before hciattach; a
+	 * "bluetooth" child of the UART is not usable here, so the reset
+	 * line is exposed as a plain rfkill instead. The vendor
+	 * bt_init.sh resets the chip by writing 0 then 1 to the rfkill
+	 * sysfs "state" (soft-block then unblock), i.e. active high asserts
+	 * shutdown.
+	 */
+	bt_rfkill: bt-rfkill {
+		compatible = "rfkill-gpio";
+		label = "bt-dev";
+		radio-type = "bluetooth";
+		shutdown-gpios = <&gpio GPIOY_8 GPIO_ACTIVE_HIGH>;
 	};
 
 	/* U-Boot rewrites this with the real DRAM size */
@@ -614,6 +632,20 @@
 	status = "okay";
 	pinctrl-0 = <&uart_ao_a_pins>;
 	pinctrl-names = "default";
+};
+
+/*
+ * CSR8811 Bluetooth, BCSP at 115200 with hardware flow control (vendor
+ * a_uart_pins: GPIOX_12/13/14/15 = tx/rx/cts/rts, uart_a1 in mainline's
+ * pinctrl-meson8; confirmed against yushan_one_10inch.dtd, which puts the
+ * commented-out a0 pins GPIOX_4-7 on "bt pcm", not this UART). See
+ * tsx-xx60-linux docs/hardware.md for the userspace bring-up (PSR upload, hciattach).
+ */
+&uart_A {
+	status = "okay";
+	pinctrl-0 = <&uart_a1_pins>, <&uart_a1_cts_rts_pins>;
+	pinctrl-names = "default";
+	uart-has-rtscts;
 };
 
 /*
