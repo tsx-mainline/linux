@@ -6,4 +6,5 @@ dtb-$(CONFIG_MACH_MESON8) += \
 	meson8b-mxq.dtb \
 	meson8b-odroidc1.dtb \
 	meson8m2-crestron-tsw1060.dtb \
+	meson8m2-crestron-tsw760.dtb \
 	meson8m2-mxiii-plus.dtb
