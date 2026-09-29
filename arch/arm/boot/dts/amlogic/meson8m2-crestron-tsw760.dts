@@ -1,0 +1,154 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Crestron TSW-760 (board "yushan_one", 7-inch 1024x600 LVDS panel).
+ * Common parts: meson8m2-crestron-tsw-xx60.dtsi. U-Boot picks this DTB from
+ * the boot image's multi-DTB container by its env aml_dt=yushan_one_7inch.
+ */
+
+/dts-v1/;
+
+#include "meson8m2-crestron-tsw-xx60.dtsi"
+
+/ {
+	model = "Crestron TSW-760";
+	compatible = "crestron,tsw760", "amlogic,meson8m2";
+
+	chosen {
+		/*
+		 * U-Boot env: fb_addr=0x07900000, 1024x600, 24 bpp,
+		 * COLOR_INDEX_24_RGB (R at bit 16). The reserved-memory node in
+		 * the dtsi (3 MiB) covers it.
+		 */
+		framebuffer@7900000 {
+			compatible = "simple-framebuffer";
+			reg = <0x07900000 (1024 * 600 * 3)>;
+			width = <1024>;
+			height = <600>;
+			stride = <(1024 * 3)>;
+			format = "r8g8b8";
+			/* see meson8m2-crestron-tsw1060.dts */
+			clocks = <&clkc CLKID_CTS_ENCL>,
+				 <&clkc CLKID_VIID_PLL_LVDS_EN>,
+				 <&clkc CLKID_VCLK2_VENCL>,
+				 <&clkc CLKID_VCLK2_VENCLMCC>,
+				 <&clkc CLKID_VPU_INTR>,
+				 <&clkc CLKID_VPU>;
+			power-domains = <&pwrc PWRC_MESON8_VPU_ID>;
+			status = "okay";
+		};
+	};
+
+	/*
+	 * LVDS panel: 7-inch 1024x600, single link, 8 bit, VESA mapping.
+	 * Timings from the vendor lcd_LP097X02 node (yushan_one_7inch.dtd; the
+	 * vendor keeps the 10-inch model name) and the live vendor driver
+	 * ("lcd_clk=51.205MHz, frame_rate=60.0Hz"): total 1344x635,
+	 * 51.2064 MHz, hsync 1/160 (high), vsync 5/6 (low), active area
+	 * 154 x 90 mm. The vendor back porches exclude the sync width, so the
+	 * front porches are 1344 - 1024 - 1 - 160 = 159 and 635 - 600 - 5 - 6 =
+	 * 24. The VID2 PLL runs at 1433.8 MHz here (DCO "level 1"), 7 x 51.2 MHz
+	 * x 4; the clock driver picks the level from the rate.
+	 */
+	panel: panel {
+		compatible = "crestron,tsw760-panel", "panel-lvds";
+		width-mm = <154>;
+		height-mm = <90>;
+		data-mapping = "vesa-24";
+		power-supply = <&panel_pwr>;
+		backlight = <&backlight>;
+
+		panel-timing {
+			clock-frequency = <51206400>;
+			hactive = <1024>;
+			vactive = <600>;
+			hfront-porch = <159>;
+			hsync-len = <1>;
+			hback-porch = <160>;
+			vfront-porch = <24>;
+			vsync-len = <5>;
+			vback-porch = <6>;
+			hsync-active = <1>;
+			vsync-active = <0>;
+		};
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&vpu_lvds_out>;
+			};
+		};
+	};
+};
+
+&touchscreen {
+	touchscreen-size-x = <1024>;
+	touchscreen-size-y = <600>;
+
+	/*
+	 * Five capacitive keys right of the LCD, vendor tpkey_1..5
+	 * (yushan_one_7inch.dtd): x = 1060..1130, y = 5..90, 120..210,
+	 * 250..340, 380..470, 510..600, top to bottom. The gaps between the
+	 * keys are only 30 units here (70 on the 10-inch), so the areas are
+	 * widened by 10 units vertically and 20 horizontally. Same key codes
+	 * as the 10-inch: KEY_F13..KEY_F17, top to bottom.
+	 */
+	touch-overlay {
+		segment-screen {
+			label = "screen";
+			x-origin = <0>;
+			x-size = <1024>;
+			y-origin = <0>;
+			y-size = <600>;
+		};
+
+		segment-key1 {
+			label = "key1";
+			linux,code = <KEY_F13>;
+			x-origin = <1040>;
+			x-size = <110>;
+			y-origin = <0>;
+			y-size = <100>;
+		};
+
+		segment-key2 {
+			label = "key2";
+			linux,code = <KEY_F14>;
+			x-origin = <1040>;
+			x-size = <110>;
+			y-origin = <110>;
+			y-size = <110>;
+		};
+
+		segment-key3 {
+			label = "key3";
+			linux,code = <KEY_F15>;
+			x-origin = <1040>;
+			x-size = <110>;
+			y-origin = <240>;
+			y-size = <110>;
+		};
+
+		segment-key4 {
+			label = "key4";
+			linux,code = <KEY_F16>;
+			x-origin = <1040>;
+			x-size = <110>;
+			y-origin = <370>;
+			y-size = <110>;
+		};
+
+		segment-key5 {
+			label = "key5";
+			linux,code = <KEY_F17>;
+			x-origin = <1040>;
+			x-size = <110>;
+			y-origin = <500>;
+			y-size = <110>;
+		};
+	};
+};
+
+/*
+ * Audio: the same AIU I2S -> ZLS38051 -> 2x TFA9890 path as the 10-inch
+ * (the ALSA card keeps the name "TSW-1060", which userspace keys on).
+ */
+#include "meson8m2-crestron-tsw1060-audio.dtsi"
