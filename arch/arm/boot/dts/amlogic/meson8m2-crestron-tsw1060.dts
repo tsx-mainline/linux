@@ -77,6 +77,39 @@
 			};
 		};
 	};
+
+	/*
+	 * Vendor U-Boot display configuration, the 10-inch values
+	 * (yushan_one_10inch).
+	 * For the vendor U-Boot only: see the comment above /vpu in
+	 * meson8m2-crestron-tsw-xx60.dtsi. The vendor keeps the model name
+	 * LP097X02 on every panel size.
+	 */
+	bl_extern_i2c_mp3309c {
+		compatible = "amlogic,bl_i2c_mp3309c";
+		dev_name = "bl_i2c_mp3309c";
+		status = "okay";
+		gpio_enable_on_off = "GPIODV_28", "1", "0";
+		type = <0>;
+		i2c_address = <0x17>;
+		i2c_bus = "i2c_bus_b";
+		dim_max_min = <23 1>;
+		dim_max_min_edt = <24 2>;
+	};
+
+	lcd_LP097X02 {
+		model_name = "LP097X02";
+		interface = "lvds";
+		active_area = <217 136>;
+		lcd_bits_option = <8 1>;
+		resolution = <1280 800>;
+		period = <1360 835>;
+		clock_hz_pol = <68136000 0>;
+		hsync_width_backporch = <20 30>;
+		vsync_width_backporch = <2 4>;
+		pol_hsync_vsync = <1 12>;
+		max_lane_count = <4>;
+	};
 };
 
 &touchscreen {
