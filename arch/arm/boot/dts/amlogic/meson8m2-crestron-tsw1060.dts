@@ -1,47 +1,18 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 /*
- * Crestron TSW-1060 (board "yushan_one", 10-inch 1280x800 LVDS panel).
- *
- * The panel is driven by drm/meson (VPU LVDS output, panel-lvds). Until
- * drm/meson binds, the console uses the boot-logo framebuffer that U-Boot
- * left scanning out (simple-framebuffer); drm/meson removes it when it
- * binds. The framebuffer node holds the clocks and the power domain of that
- * pipeline so they are not turned off at late_initcall.
- *
- * Vendor references: yushan_one_10inch.dtd (Amlogic 3.10 kernel), where
- * i2c-0 = I2C_AO, i2c-1 = I2C_A, i2c-2 = I2C_B.
+ * Crestron TSW-1060 and TSS-10 (board "yushan_one", 10-inch 1280x800 LVDS
+ * panel). Common parts: meson8m2-crestron-tsw-xx60.dtsi.
  */
 
 /dts-v1/;
 
-#include "meson8m2.dtsi"
-
-#include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/input/input.h>
-#include <dt-bindings/interrupt-controller/irq.h>
+#include "meson8m2-crestron-tsw-xx60.dtsi"
 
 / {
 	model = "Crestron TSW-1060";
 	compatible = "crestron,tsw1060", "amlogic,meson8m2";
 
-	aliases {
-		ethernet0 = &ethmac;
-		serial0 = &uart_AO;
-		serial1 = &uart_A;
-		/* same numbering as the vendor kernel */
-		i2c0 = &i2c_AO;
-		i2c1 = &i2c_A;
-		i2c2 = &i2c_B;
-		mmc0 = &sd_card_slot;
-		mmc1 = &sdhc;
-	};
-
 	chosen {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		ranges;
-		stdout-path = "serial0:115200n8";
-
 		/* U-Boot env: fb_addr=0x07900000, 24 bpp, COLOR_INDEX_24_RGB (R at bit 16) */
 		framebuffer@7900000 {
 			compatible = "simple-framebuffer";
@@ -72,192 +43,12 @@
 		};
 	};
 
-	gpio-keys-polled {
-		compatible = "gpio-keys-polled";
-		poll-interval = <100>;
-
-		/* vendor gpio_keypad: GPIOAO_3, KEY_POWER */
-		button-power {
-			label = "power";
-			linux,code = <KEY_POWER>;
-			gpios = <&gpio_ao GPIOAO_3 GPIO_ACTIVE_LOW>;
-		};
-	};
-
-	/*
-	 * Front-panel key LEDs (vendor keypad_led node, jbl_kpled driver):
-	 * one enable GPIO per key and one common
-	 * brightness PWM, PWM_C on GPIODV_29 (kpled_ctrl_method = 2, positive
-	 * logic, 366 Hz, duty 0..100 %). A key is lit when its enable is on
-	 * and the brightness is above 0.
-	 * Checked at the panel 2026-09-26 (eyes): the enables are active LOW
-	 * (the vendor "high = on" is inverted by the board), and the vendor
-	 * led1..5 order is bottom to top. Here tsx:key1..5 = top to bottom, the
-	 * same order as the touch keys KEY_F13..KEY_F17.
-	 * U-Boot lights the keys (enables on, PWM 50 %); both nodes keep that
-	 * state when they probe, so the keys do not go dark and light up again
-	 * during boot (userspace, tsx-buttons, sets the level later).
-	 */
-	keypad-leds {
-		compatible = "gpio-leds";
-
-		led-1 {
-			label = "tsx:key1";
-			gpios = <&gpio GPIOX_11 GPIO_ACTIVE_LOW>;
-			default-state = "on";
-		};
-
-		led-2 {
-			label = "tsx:key2";
-			gpios = <&gpio GPIOX_19 GPIO_ACTIVE_LOW>;
-			default-state = "on";
-		};
-
-		led-3 {
-			label = "tsx:key3";
-			gpios = <&gpio GPIOX_10 GPIO_ACTIVE_LOW>;
-			default-state = "on";
-		};
-
-		led-4 {
-			label = "tsx:key4";
-			gpios = <&gpio GPIOX_17 GPIO_ACTIVE_LOW>;
-			default-state = "on";
-		};
-
-		led-5 {
-			label = "tsx:key5";
-			gpios = <&gpio GPIOX_16 GPIO_ACTIVE_LOW>;
-			default-state = "on";
-		};
-	};
-
-	keypad-backlight {
-		compatible = "pwm-leds";
-
-		led-0 {
-			label = "tsx:keypad";
-			/* 366 Hz like the vendor (24 MHz / 65536) */
-			pwms = <&pwm_cd 0 2730000 0>;
-			max-brightness = <255>;
-			default-state = "keep";
-		};
-	};
-
-	/*
-	 * CSR8811 Bluetooth (vendor bt-dev, "amlogic,bt-dev" gpio_reset =
-	 * GPIOY_8). The chip is BCSP over UART A (&uart_A below), not HCI
-	 * H4/H5, and needs a PSR upload from userspace before hciattach; a
-	 * "bluetooth" child of the UART is not usable here, so the reset
-	 * line is exposed as a plain rfkill instead. The vendor
-	 * bt_init.sh resets the chip by writing 0 then 1 to the rfkill
-	 * sysfs "state" (soft-block then unblock), i.e. active high asserts
-	 * shutdown.
-	 */
-	bt_rfkill: bt-rfkill {
-		compatible = "rfkill-gpio";
-		label = "bt-dev";
-		radio-type = "bluetooth";
-		shutdown-gpios = <&gpio GPIOY_8 GPIO_ACTIVE_HIGH>;
-	};
-
-	/* U-Boot rewrites this with the real DRAM size */
-	memory@0 {
-		device_type = "memory";
-		reg = <0x0 0x80000000>;
-	};
-
-	reserved-memory {
-		/* U-Boot boot-logo framebuffer, still being scanned out */
-		fb@7900000 {
-			reg = <0x07900000 0x300000>;
-			no-map;
-		};
-
-		/* vendor ramoops (ramoops.mem_address in the U-Boot bootargs) */
-		ramoops@4e00000 {
-			reg = <0x04e00000 0x100000>;
-			no-map;
-		};
-	};
-
-	usb_vbus: regulator-usb-vbus {
-		/* vendor usb_a gpio-vbus-power = "GPIOX_18" ("DWC_OTG", high) */
-		compatible = "regulator-fixed";
-		regulator-name = "USB_VBUS";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		gpio = <&gpio GPIOX_18 GPIO_ACTIVE_HIGH>;
-		enable-active-high;
-	};
-
-	/* SAR ADC reference (AVDD 1.8 V); fixed placeholder, see pmic@32 */
-	vddio_ao1v8: regulator-vddio-ao1v8 {
-		compatible = "regulator-fixed";
-		regulator-name = "VDDIO_AO18";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-	};
-
-	vcc_3v3: regulator-vcc3v3 {
-		compatible = "regulator-fixed";
-		regulator-name = "VCC3V3";
-		regulator-min-microvolt = <3300000>;
-		regulator-max-microvolt = <3300000>;
-	};
-
 	/*
 	 * LVDS panel: 10.1-inch 1280x800, single link, 8 bit, VESA mapping.
 	 * Timings from the vendor lcd_LP097X02 node (yushan_one_10inch.dtd) and the
 	 * live vendor driver: total 1360x835, 68.136 MHz, hsync 20/30 (high),
-	 * vsync 2/4 (low).
-	 *
-	 * Panel power, vendor yushan_one_10inch.dtd:
-	 *   on:  GPIODV_22=0 (10 ms), GPIODV_23=0 (20 ms), GPIODV_8=0 (150 ms),
-	 *        GPIODV_8=1 (20 ms), LVDS signal on (10 ms), then backlight
-	 *   off: LVDS signal off (20 ms), GPIODV_8=0 (120 ms), GPIODV_23=1 (10 ms),
-	 *        GPIODV_22=1 (100 ms)
-	 * Modelled as a chain of fixed regulators: enabling the last one enables its
-	 * supplies first and waits each startup delay. GPIODV_8 is low while
-	 * GPIODV_23 settles, so its 150 ms low time is part of the GPIODV_23 delay.
-	 * The 20/120/10 ms power-off gaps have no regulator-fixed equivalent; only
-	 * the 100 ms before the next power-on is kept (off-on-delay-us).
-	 * regulator-boot-on: U-Boot has powered the panel and shows its logo when
-	 * the kernel starts. Without it, each regulator switched the panel off
-	 * when it probed, while the backlight stayed on, until the first mode
-	 * set (the boot splash, ~2.2 s later) powered it up again: a visible
-	 * flash on every boot. With it the panel stays powered from U-Boot to
-	 * the first mode set, which then finds the regulators already on. A
-	 * later power-off (DPMS off) and power-on get the full sequence.
+	 * vsync 2/4 (low). Power: the regulator chain in the dtsi.
 	 */
-	panel_vdd: regulator-panel-vdd {
-		compatible = "regulator-fixed";
-		regulator-name = "LCD_PWR_DV22";
-		regulator-boot-on;
-		gpio = <&gpio GPIODV_22 GPIO_ACTIVE_LOW>;
-		startup-delay-us = <10000>;
-		off-on-delay-us = <100000>;
-	};
-
-	panel_vdd2: regulator-panel-vdd2 {
-		compatible = "regulator-fixed";
-		regulator-name = "LCD_PWR_DV23";
-		regulator-boot-on;
-		gpio = <&gpio GPIODV_23 GPIO_ACTIVE_LOW>;
-		vin-supply = <&panel_vdd>;
-		startup-delay-us = <170000>;	/* 20 ms + GPIODV_8 low 150 ms */
-	};
-
-	panel_pwr: regulator-panel-en {
-		compatible = "regulator-fixed";
-		regulator-name = "LCD_EN_DV8";
-		regulator-boot-on;
-		gpio = <&gpio GPIODV_8 GPIO_ACTIVE_HIGH>;
-		enable-active-high;
-		vin-supply = <&panel_vdd2>;
-		startup-delay-us = <20000>;
-	};
-
 	panel: panel {
 		compatible = "crestron,tsw1060-panel", "panel-lvds";
 		width-mm = <217>;
@@ -286,436 +77,77 @@
 			};
 		};
 	};
-
-	thermal-zones {
-		soc-thermal {
-			/*
-			 * The vendor thermal table (yushan_one_10inch.dtd,
-			 * trip_point) caps the CPU at 1608 MHz from 70 C,
-			 * 1200 MHz from 80 C and 800 MHz from 90 C. Above
-			 * 70 C step_wise may go down to cooling state 1, one
-			 * OPP below the top: 1416 MHz, since 1608 MHz is the
-			 * top OPP. This is kept on purpose. With four cores
-			 * busy for 15 min (case closed) the CPU stays at
-			 * 1416 MHz and 75-77 C; without this trip it runs at
-			 * 1608/1416/1200 MHz and 80-84 C for only 3 % more
-			 * throughput. A realistic kiosk load (dashboard
-			 * reloads, audio, voice) stays below 70 C at 1608 MHz.
-			 * meson8.dtsi's 80 C passive trip (unlimited) and
-			 * 90 C hot trip still apply.
-			 */
-			trips {
-				soc_warm: soc-warm {
-					temperature = <70000>; /* millicelsius */
-					hysteresis = <2000>; /* millicelsius */
-					type = "passive";
-				};
-			};
-
-			cooling-maps {
-				map-warm {
-					trip = <&soc_warm>;
-					cooling-device = <&cpu0 THERMAL_NO_LIMIT 1>,
-							 <&cpu1 THERMAL_NO_LIMIT 1>,
-							 <&cpu2 THERMAL_NO_LIMIT 1>,
-							 <&cpu3 THERMAL_NO_LIMIT 1>;
-				};
-			};
-		};
-	};
 };
 
-/*
- * VCCK is DCDC1 of the RN5T618 (see pmic@32). Same pattern as
- * meson8m2-mxiii.dtsi; all four CPUs name the supply (like
- * meson8m2-wetek-core.dts) although they share one OPP table and policy.
- */
-&cpu0 {
-	cpu-supply = <&vcck>;
-};
-
-&cpu1 {
-	cpu-supply = <&vcck>;
-};
-
-&cpu2 {
-	cpu-supply = <&vcck>;
-};
-
-&cpu3 {
-	cpu-supply = <&vcck>;
-};
-
-/*
- * The top OPP is 1608 MHz. opp-1800000000 and opp-1992000000 (both
- * disabled in meson8.dtsi) stay off on this board:
- *
- * - 1800 MHz / 1125 mV: VCCK follows the OPP and a constant single-core
- *   load passes, but the kiosk's bursty load panicked the kernel twice
- *   within a minute (register corruption on CPU3, idle/IRQ-exit path),
- *   for only +11 % single-core throughput. It was a turbo-mode boost OPP
- *   here before; removed so userspace cannot turn it on.
- * - 1992 MHz / 1150 mV (sys_pll M=83): oopsed 8 s into boot (random kernel
- *   state corruption on CPU3, then a panic). The vendor DVFS table's
- *   "1992 MHz" is sys_pll 0x4000c247, whose M field is 71 (1704 MHz at
- *   24 MHz/step) plus undocumented bits 14-15, so the vendor never ran a
- *   real 1992 MHz either.
- *
- * See docs/hardware.md "SoC and CPU" in tsx-xx60-linux.
- */
-
-/*
- * No CVBS connector on this board. The VPU node references the DAC as its
- * "cvbs-dac" PHY; left enabled without a PHY driver, fw_devlink holds the VPU
- * (and so the panel) back until the 10 s deferred probe timeout.
- */
-&cvbs_dac {
-	status = "disabled";
-};
-
-&ethmac {
-	status = "okay";
-	pinctrl-0 = <&eth_rmii_pins>;
-	pinctrl-names = "default";
-	/* vendor DTS: "meson8m2-rmii-dwmac"; PHY found by scanning the MDIO bus */
-	phy-mode = "rmii";
-};
-
-/* i2c-0: RN5T618 PMIC */
-&i2c_AO {
-	status = "okay";
-	pinctrl-0 = <&i2c_ao_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <100000>;
-
-	pmic@32 {
-		compatible = "ricoh,rn5t618";
-		reg = <0x32>;
-
-		/*
-		 * Rail map (vendor kernel ricoh_pmu.c convert_id_to_dcdc(),
-		 * U-Boot firmware/power.c rn5t618_power_init(), and the SPL
-		 * log "DC01 v:1100, 0x[36]"): DCDC1 = VCCK (CPU core, 1.1 V at
-		 * boot), DCDC2 = VDDEE/VDDAO (1.15 V), DCDC3 = DDR3L (U-Boot
-		 * sets 1.5 V, then 1.35 V after DDR init).
-		 *
-		 * Only DCDC1 gets constraints, for cpufreq. Every other rail
-		 * has no child node, so the regulator core registers it
-		 * without init data: read-only, no voltage change, no
-		 * enable/disable, exactly as U-Boot left it.
-		 * regulator-always-on on a rail that is off would switch it
-		 * on, and constraints without it would let
-		 * regulator_late_cleanup switch off rails nobody claims.
-		 */
-		regulators {
-			vcck: DCDC1 {
-				regulator-name = "vcck";
-				regulator-min-microvolt = <825000>;
-				regulator-max-microvolt = <1150000>;
-				/*
-				 * The driver has no ramp data. The vendor
-				 * kernel waits 100 us after each DCDC write
-				 * (steps of 25..75 mV); 0.25 mV/us is at least
-				 * as slow for every step (50 mV -> 200 us).
-				 */
-				regulator-ramp-delay = <250>;
-				regulator-boot-on;
-				regulator-always-on;
-			};
-		};
-	};
-};
-
-/*
- * i2c-1 (vendor i2c_bus_a):
- *   0x0e  unknown (not in the vendor DT or the Android init scripts)
- *   0x34  NXP TFA9890 smart amplifier, left speaker   (vendor
- *   0x36  NXP TFA9890 smart amplifier, right speaker   audio/tfa9890/.../stereo.ini)
- *   0x45  Microsemi ZLS38051 (ZL380xx "Timberwolf") voice processor; boots
- *         its firmware + config from its own SPI flash (vendor zls38051.h:
- *         ZL380XX_TW_UPDATE_FIRMWARE undefined)
- *   0x4a  Maxim MAX44009 ambient light sensor, INT on GPIOX_7
- * Audio (TFA9890, ZLS38051, AIU): meson8m2-crestron-tsw1060-audio.dtsi.
- */
-&i2c_A {
-	status = "okay";
-	pinctrl-0 = <&i2c_a_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <100000>;
+&touchscreen {
+	touchscreen-size-x = <1280>;
+	touchscreen-size-y = <800>;
 
 	/*
-	 * vendor sensor/max44009: address 0x4a, irq GPIOX_7 (vendor gpio 119
-	 * "ls_max44009", input, reads high: external pull-up, open-drain
-	 * active-low INT). gpio_intc numbers the pads globally: GPIOX_7 = 119.
-	 * The mainline driver uses the interrupt only for threshold events;
-	 * reads work without it.
+	 * The glass extends to the right of the LCD: five capacitive
+	 * keys in a column at x = 1310..1380 of the touch controller
+	 * (vendor tpkey_1..5, reported by the vendor FocalTech driver
+	 * as KEY_BACK, KEY_HOME, KEY_MUTE, KEY_VOLUMEUP,
+	 * KEY_VOLUMEDOWN). Here the areas are widened by 20 units and
+	 * report KEY_F13..KEY_F17, keys that neither Chromium nor
+	 * the compositor act on; userspace (tsx-buttons) maps them.
+	 * The touchscreen segment drops contacts outside the LCD.
 	 */
-	light-sensor@4a {
-		compatible = "maxim,max44009";
-		reg = <0x4a>;
-		interrupt-parent = <&gpio_intc>;
-		interrupts = <119 IRQ_TYPE_EDGE_FALLING>;
-	};
-};
+	touch-overlay {
+		segment-screen {
+			label = "screen";
+			x-origin = <0>;
+			x-size = <1280>;
+			y-origin = <0>;
+			y-size = <800>;
+		};
 
-/* i2c-2: backlight driver and touch controller */
-&i2c_B {
-	status = "okay";
-	pinctrl-0 = <&i2c_b_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <100000>;
+		segment-key1 {
+			label = "key1";
+			linux,code = <KEY_F13>;
+			x-origin = <1290>;
+			x-size = <120>;
+			y-origin = <30>;
+			y-size = <130>;
+		};
 
-	/*
-	 * Vendor bl_ctrl_method = 4 (extern) with bl_extern_i2c_mp3309c:
-	 * analog (I2C) dimming, EN on GPIODV_28. The vendor writes
-	 * reg1 = 0x28 (SYNC, OVP 35.5 V), which is also the mainline
-	 * driver default. The vendor never uses dimming steps above 23
-	 * (24 on EDT glass); the mainline driver exposes 0..31.
-	 * default-brightness: the step U-Boot leaves (vendor level 128 of
-	 * 1..255 on the 1..23 / 2..24 dimming range: 12, 13 on EDT glass), so
-	 * the probe does not change the brightness of the U-Boot logo.
-	 */
-	backlight: backlight@17 {
-		compatible = "mps,mp3309c";
-		reg = <0x17>;
-		enable-gpios = <&gpio GPIODV_28 GPIO_ACTIVE_HIGH>;
-		default-brightness = <13>;
-	};
+		segment-key2 {
+			label = "key2";
+			linux,code = <KEY_F14>;
+			x-origin = <1290>;
+			x-size = <120>;
+			y-origin = <190>;
+			y-size = <130>;
+		};
 
-	/* vendor touch_ft5x06: irq GPIOX_21, reset GPIODV_0 */
-	touchscreen@38 {
-		compatible = "edt,edt-ft5506";
-		reg = <0x38>;
-		interrupt-parent = <&gpio_intc>;
-		/* gpio_intc numbers the pads globally: GPIOX_21 = 133 */
-		interrupts = <133 IRQ_TYPE_EDGE_FALLING>;
-		reset-gpios = <&gpio GPIODV_0 GPIO_ACTIVE_LOW>;
-		touchscreen-size-x = <1280>;
-		touchscreen-size-y = <800>;
+		segment-key3 {
+			label = "key3";
+			linux,code = <KEY_F15>;
+			x-origin = <1290>;
+			x-size = <120>;
+			y-origin = <330>;
+			y-size = <130>;
+		};
 
-		/*
-		 * The glass extends to the right of the LCD: five capacitive
-		 * keys in a column at x = 1310..1380 of the touch controller
-		 * (vendor tpkey_1..5, reported by the vendor FocalTech driver
-		 * as KEY_BACK, KEY_HOME, KEY_MUTE, KEY_VOLUMEUP,
-		 * KEY_VOLUMEDOWN). Here the areas are widened by 20 units and
-		 * report KEY_F13..KEY_F17, keys that neither Chromium nor
-		 * the compositor act on; userspace (tsx-buttons) maps them.
-		 * The touchscreen segment drops contacts outside the LCD.
-		 */
-		touch-overlay {
-			segment-screen {
-				label = "screen";
-				x-origin = <0>;
-				x-size = <1280>;
-				y-origin = <0>;
-				y-size = <800>;
-			};
+		segment-key4 {
+			label = "key4";
+			linux,code = <KEY_F16>;
+			x-origin = <1290>;
+			x-size = <120>;
+			y-origin = <480>;
+			y-size = <130>;
+		};
 
-			segment-key1 {
-				label = "key1";
-				linux,code = <KEY_F13>;
-				x-origin = <1290>;
-				x-size = <120>;
-				y-origin = <30>;
-				y-size = <130>;
-			};
-
-			segment-key2 {
-				label = "key2";
-				linux,code = <KEY_F14>;
-				x-origin = <1290>;
-				x-size = <120>;
-				y-origin = <190>;
-				y-size = <130>;
-			};
-
-			segment-key3 {
-				label = "key3";
-				linux,code = <KEY_F15>;
-				x-origin = <1290>;
-				x-size = <120>;
-				y-origin = <330>;
-				y-size = <130>;
-			};
-
-			segment-key4 {
-				label = "key4";
-				linux,code = <KEY_F16>;
-				x-origin = <1290>;
-				x-size = <120>;
-				y-origin = <480>;
-				y-size = <130>;
-			};
-
-			segment-key5 {
-				label = "key5";
-				linux,code = <KEY_F17>;
-				x-origin = <1290>;
-				x-size = <120>;
-				y-origin = <630>;
-				y-size = <130>;
-			};
+		segment-key5 {
+			label = "key5";
+			linux,code = <KEY_F17>;
+			x-origin = <1290>;
+			x-size = <120>;
+			y-origin = <630>;
+			y-size = <130>;
 		};
 	};
 };
 
-&pinctrl_cbus {
-	/*
-	 * RMII subset of eth_pins, as the vendor muxes it (PERIPHS_PIN_MUX_6 =
-	 * 0x7de0): GPIOZ_0/1 carry I2C_A and GPIOZ_2/3 carry I2C_B instead of
-	 * the RGMII TXD/RXD2..3 lines. The 50 MHz reference comes in on
-	 * RX_CLK_IN (GPIOZ_8); TX_CLK_50M (GPIOZ_4) is not muxed.
-	 */
-	eth_rmii_pins: ethernet-rmii {
-		mux {
-			groups = "eth_tx_en", "eth_txd1", "eth_txd0",
-				 "eth_rx_clk_in", "eth_rx_dv",
-				 "eth_rxd1", "eth_rxd0",
-				 "eth_mdio", "eth_mdc";
-			function = "ethernet";
-			bias-disable;
-		};
-	};
-
-	pwm_c_dv29_pins: pwm-c-dv29 {
-		mux {
-			groups = "pwm_c_dv29";
-			function = "pwm_c";
-			bias-disable;
-		};
-	};
-
-	i2c_a_pins: i2c-a {
-		mux {
-			groups = "i2c_sda_a0", "i2c_sck_a0";
-			function = "i2c_a";
-		};
-	};
-};
-
-/* PWM_C: front-panel key LED brightness (GPIODV_29) */
-&pwm_cd {
-	status = "okay";
-	pinctrl-0 = <&pwm_c_dv29_pins>;
-	pinctrl-names = "default";
-};
-
-&saradc {
-	status = "okay";
-	vref-supply = <&vddio_ao1v8>;
-};
-
-/* eMMC (Hynix H4G2a, Android mmcblk1): U-Boot, its env, the Android boot image */
-&sdhc {
-	status = "okay";
-	pinctrl-0 = <&sdxc_c_pins>;
-	pinctrl-names = "default";
-	bus-width = <8>;
-	max-frequency = <50000000>;
-	non-removable;
-	disable-wp;
-	cap-mmc-highspeed;
-	no-sd;
-	no-sdio;
-	vmmc-supply = <&vcc_3v3>;
-	vqmmc-supply = <&vcc_3v3>;
-};
-
-/* SD card (MP995, Android mmcblk0) on SDIO port B, CARD_0..5 */
-&sdio {
-	status = "okay";
-	pinctrl-0 = <&sd_b_pins>;
-	pinctrl-names = "default";
-
-	sd_card_slot: slot@1 {
-		compatible = "mmc-slot";
-		reg = <1>;
-		bus-width = <4>;
-		max-frequency = <40000000>;
-		no-mmc;
-		no-sdio;
-		cap-sd-highspeed;
-		disable-wp;
-		/* vendor gpio_cd = "CARD_6", gpio_cd_level = 1: high = inserted */
-		cd-gpios = <&gpio CARD_6 GPIO_ACTIVE_HIGH>;
-		vmmc-supply = <&vcc_3v3>;
-	};
-};
-
-&uart_AO {
-	status = "okay";
-	pinctrl-0 = <&uart_ao_a_pins>;
-	pinctrl-names = "default";
-};
-
-/*
- * CSR8811 Bluetooth, BCSP at 115200 with hardware flow control (vendor
- * a_uart_pins: GPIOX_12/13/14/15 = tx/rx/cts/rts, uart_a1 in mainline's
- * pinctrl-meson8; confirmed against yushan_one_10inch.dtd, which puts the
- * commented-out a0 pins GPIOX_4-7 on "bt pcm", not this UART). See
- * tsx-xx60-linux docs/hardware.md for the userspace bring-up (PSR upload, hciattach).
- */
-&uart_A {
-	status = "okay";
-	pinctrl-0 = <&uart_a1_pins>, <&uart_a1_cts_rts_pins>;
-	pinctrl-names = "default";
-	uart-has-rtscts;
-};
-
-/*
- * vendor usb_a (lm0, Android bus 2): OTG port, VBUS switch on GPIOX_18.
- * Port 1 of this root hub is the STM32 that drives the RGB LED bar
- * (14be:001b, vendor sysfs /sys/devices/lm0/usb2/2-1/2-1:1.1/stm32_io,
- * leds-crestron-stm32 here). The external USB-A socket is on the same
- * port: with a stick in the socket neither Android nor mainline sees the
- * STM32 (serial logs of 2026-09-25), so the two presumably share the port via
- * a switch on the board. Host mode is forced; the vendor kernel ran it as
- * OTG with the hardware ID pin, which also ended in host mode.
- */
-&usb0 {
-	status = "okay";
-	dr_mode = "host";
-	vbus-supply = <&usb_vbus>;
-};
-
-&usb0_phy {
-	status = "okay";
-};
-
-/* vendor usb_b (lm1, Android bus 1): host-only port, nothing attached on the TSW-1060 */
-&usb1 {
-	status = "okay";
-	dr_mode = "host";
-};
-
-&usb1_phy {
-	status = "okay";
-};
-
-&vpu {
-	status = "okay";
-
-	/*
-	 * meson8.dtsi routes VCLK2 to the VID PLL; the LVDS pixel clock needs
-	 * the VID2 PLL path: VIID post divider (/7) -> XD -> VCLK2 -> ENCL.
-	 * The driver sets the same parents again before each modeset.
-	 */
-	assigned-clocks = <&clkc CLKID_VCLK_IN_SEL>,
-			  <&clkc CLKID_VCLK2_IN_SEL>,
-			  <&clkc CLKID_VIID_PLL>,
-			  <&clkc CLKID_CTS_ENCL_SEL>;
-	assigned-clock-parents = <&clkc CLKID_VID_PLL_FINAL_DIV>,
-				 <&clkc CLKID_VID2_PLL_FINAL_DIV>,
-				 <&clkc CLKID_VIID_PLL_POST_DIV>,
-				 <&clkc CLKID_VCLK2_DIV1>;
-};
-
-&vpu_lvds_port {
-	vpu_lvds_out: endpoint {
-		remote-endpoint = <&panel_in>;
-	};
-};
-
-/* Audio: AIU I2S -> ZLS38051 -> 2x TFA9890 */
+/* Audio: AIU I2S -> ZLS38051 -> 2x TFA9890 (after the panel: node order) */
 #include "meson8m2-crestron-tsw1060-audio.dtsi"
