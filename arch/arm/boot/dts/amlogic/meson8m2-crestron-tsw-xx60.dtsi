@@ -263,6 +263,171 @@
 			};
 		};
 	};
+
+	/*
+	 * Vendor U-Boot display configuration. The nodes from here to the end
+	 * of this block are for the vendor U-Boot only; no Linux driver uses
+	 * them.
+	 *
+	 * Before its autoboot prompt, the vendor U-Boot runs the env command
+	 * preloaddtb ("imgread dtb boot"): it reads the DTB of the Android
+	 * boot image in the eMMC "boot" partition (picked from the multi-DTB
+	 * container by aml_dt) and then sets up the VPU, the LCD, the
+	 * backlight and the key LEDs from these nodes, looked up by path
+	 * (/vpu, /lcd, /lcd_<model>, /backlight, /bl_extern_*, /lcd_extern_*,
+	 * /keypad_led and /pinmux/<name>). Without them it falls back to a
+	 * built-in MIPI-DSI default ("lcd_clk=39.999MHz, frame_rate=0.0Hz"),
+	 * and the TSW-760 stays black until the kernel sets the mode.
+	 *
+	 * The nodes are copied from the stock firmware 3.002.1061 DTBs
+	 * (yushan_one_10inch / yushan_one_7inch), without the properties only
+	 * the vendor kernel reads (pinctrl-*, lcd_model_config; U-Boot finds
+	 * the model node by lcd_model_name) and without the fixed phandle
+	 * numbers. The panel model node and bl_extern_i2c_mp3309c differ by
+	 * panel size and are in the board files. No compatible here matches a
+	 * Linux driver.
+	 */
+	vpu {
+		compatible = "amlogic,vpu";
+		dev_name = "vpu";
+		status = "ok";
+		clk_level = <7>;
+	};
+
+	backlight {
+		compatible = "amlogic,backlight";
+		dev_name = "backlight";
+		status = "okay";
+		bl_level_default_uboot_kernel = <128 128>;
+		bl_level_middle_mapping = <128 128>;
+		bl_level_max_min = <255 1>;
+		bl_power_on_delay = <200>;
+		bl_ctrl_method = <4>;
+		bl_gpio_port_on_off = "GPIODV_28", "1", "0";
+		bl_gpio_dim_max_min = <0x0 0xf>;
+		bl_pwm_port_gpio_used = "PWM_C", "1";
+		bl_pwm_freq = <10000>;
+		bl_pwm_duty_max_min = <100 1>;
+	};
+
+	bl_extern_i2c_lp8556 {
+		compatible = "amlogic,bl_i2c_lp8556";
+		dev_name = "bl_i2c_lp8556";
+		status = "disabled";
+		gpio_enable_on_off = "GPIODV_28", "1", "0";
+		type = <0>;
+		i2c_address = <0x2c>;
+		i2c_bus = "i2c_bus_b";
+		dim_max_min = <255 10>;
+	};
+
+	lcd {
+		compatible = "amlogic,lcd";
+		dev_name = "lcd";
+		status = "okay";
+		lcd_model_name = "lcd_LP097X02";
+		lcd_bits_user = <8>;
+		ttl_rb_bit_swap = <0 0>;
+		lvds_channel_pn_swap = <0>;
+		valid_hvsync_de = <1 1>;
+		hsign_hoffset_vsign_voffset = <0 0 0 0>;
+		dither_user_ctrl = <0 0x000>;
+		vadj_brightness_contrast_saturation = <0x0 0x80 0x100>;
+		gamma_en_reverse = <1 0>;
+		gamma_multi_rgb_coeff = <0 100 100 100>;
+		gamma_table = <0 1 2 3 4 5 6 7 8 8 9 10
+			11 12 13 15 16 17 18 19 20 21 22 23
+			24 25 26 27 28 29 30 31 32 33 34 35
+			36 37 37 38 39 40 41 42 43 44 45 46
+			47 48 49 50 50 51 52 53 54 55 56 57
+			57 58 59 60 61 62 63 64 65 65 67 67
+			68 69 70 71 72 73 74 75 76 76 77 78
+			79 80 81 82 82 83 84 85 86 87 88 88
+			89 90 91 92 93 94 95 96 97 97 98 99
+			100 101 102 103 104 105 106 107 108 109 110 111
+			112 113 114 115 116 117 118 119 120 121 122 123
+			124 125 126 127 128 129 130 131 131 132 133 135
+			136 136 138 139 140 141 142 143 144 145 146 147
+			148 149 151 152 153 154 155 156 157 158 159 160
+			161 162 163 164 165 166 167 168 169 170 171 172
+			173 174 176 177 178 179 180 181 182 183 184 185
+			186 188 189 190 191 192 193 195 196 197 198 199
+			200 202 203 204 205 206 208 209 210 211 212 213
+			214 216 217 218 219 220 221 222 223 224 225 226
+			228 229 230 231 232 233 234 235 236 237 238 239
+			240 241 242 243 244 245 246 247 248 249 250 251
+			252 253 254 255>;
+		clock_spread_spectrum = <0>;
+		clock_auto_generation = <1>;
+		clk_pll_div_clk_ctrl = <0x100042b 0x18833 0x03a82102>;
+		lvds_vswing = <1>;
+		lvds_user_repack = <0 0>;
+		edp_user_link_rate_lane_count = <1 1 4>;
+		edp_link_adaptive_vswing = <0 0>;
+		edp_sync_clock_mode = <1>;
+		edp_edid_timing_used = <0>;
+		rgb_base_coeff = <0xf0 0x74a>;
+		power_on_step_1 = "cpu", "GPIODV_22", "0";
+		power_on_step_2 = "cpu", "GPIODV_23", "0";
+		power_on_step_3 = "cpu", "GPIODV_8", "0";
+		power_on_step_4 = "cpu", "GPIODV_8", "1";
+		power_on_step_5 = "signal";
+		power_on_delay = <10 20 150 20 10>;
+		power_off_step_1 = "signal";
+		power_off_step_2 = "cpu", "GPIODV_8", "0";
+		power_off_step_3 = "cpu", "GPIODV_23", "1";
+		power_off_step_4 = "cpu", "GPIODV_22", "1";
+		power_off_delay = <20 120 10 100>;
+	};
+
+	lcd_extern_mipi_TFT540960 {
+		compatible = "amlogic,lcd_mipi_TFT540960";
+		dev_name = "lcd_mipi_TFT540960";
+		status = "okay";
+		type = <2>;
+	};
+
+	keypad_led {
+		compatible = "amlogic,keypad_led";
+		dev_name = "kpled";
+		status = "okay";
+		kpled_level_default_uboot_kernel = <128 128>;
+		kpled_level_middle_mapping = <102 70>;
+		kpled_level_max_min = <255 1>;
+		kpled_power_on_delay = <200>;
+		kpled_ctrl_method = <2>;
+		kpled_gpio_port_on_off = "GPIOX_16", "GPIOX_17", "GPIOX_10",
+					 "GPIOX_19", "GPIOX_11", "0", "1";
+		kpled_gpio_dim_max_min = <0x0 0xf>;
+		kpled_pwm_port_gpio_used = "PWM_C", "1";
+		kpled_pwm_freq = <366>;
+		kpled_pwm_duty_max_min = <100 0>;
+	};
+
+	/* only the pin groups the U-Boot key LED and backlight code look up */
+	pinmux {
+		compatible = "amlogic,pinmux-m8";
+		dev_name = "pinmux";
+		#pinmux-cells = <2>;
+
+		keypad_led {
+			amlogic,setmask = <3 0x2000000>;
+			amlogic,clrmask = <3 0x0>;
+			amlogic,pins = "GPIODV_29";
+		};
+
+		lcd_backlight {
+			amlogic,setmask = <3 0x1000000>;
+			amlogic,clrmask = <0 0x48 7 0x10000200>;
+			amlogic,pins = "GPIODV_9";
+		};
+
+		lcd_backlight_combo {
+			amlogic,setmask = <3 0x5000000>;
+			amlogic,clrmask = <0 0x48 7 0x18000200>;
+			amlogic,pins = "GPIODV_9", "GPIODV_28";
+		};
+	};
 };
 
 /*
