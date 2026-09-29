@@ -94,6 +94,9 @@
 	 * (the vendor "high = on" is inverted by the board), and the vendor
 	 * led1..5 order is bottom to top. Here tsx:key1..5 = top to bottom, the
 	 * same order as the touch keys KEY_F13..KEY_F17.
+	 * U-Boot lights the keys (enables on, PWM 50 %); both nodes keep that
+	 * state when they probe, so the keys do not go dark and light up again
+	 * during boot (userspace, tsx-buttons, sets the level later).
 	 */
 	keypad-leds {
 		compatible = "gpio-leds";
@@ -137,6 +140,7 @@
 			/* 366 Hz like the vendor (24 MHz / 65536) */
 			pwms = <&pwm_cd 0 2730000 0>;
 			max-brightness = <255>;
+			default-state = "keep";
 		};
 	};
 
@@ -218,12 +222,18 @@
 	 * GPIODV_23 settles, so its 150 ms low time is part of the GPIODV_23 delay.
 	 * The 20/120/10 ms power-off gaps have no regulator-fixed equivalent; only
 	 * the 100 ms before the next power-on is kept (off-on-delay-us).
-	 * No regulator-boot-on: the regulators switch the panel off when they probe,
-	 * so the panel always gets the full power-on sequence.
+	 * regulator-boot-on: U-Boot has powered the panel and shows its logo when
+	 * the kernel starts. Without it, each regulator switched the panel off
+	 * when it probed, while the backlight stayed on, until the first mode
+	 * set (the boot splash, ~2.2 s later) powered it up again: a visible
+	 * flash on every boot. With it the panel stays powered from U-Boot to
+	 * the first mode set, which then finds the regulators already on. A
+	 * later power-off (DPMS off) and power-on get the full sequence.
 	 */
 	panel_vdd: regulator-panel-vdd {
 		compatible = "regulator-fixed";
 		regulator-name = "LCD_PWR_DV22";
+		regulator-boot-on;
 		gpio = <&gpio GPIODV_22 GPIO_ACTIVE_LOW>;
 		startup-delay-us = <10000>;
 		off-on-delay-us = <100000>;
@@ -232,6 +242,7 @@
 	panel_vdd2: regulator-panel-vdd2 {
 		compatible = "regulator-fixed";
 		regulator-name = "LCD_PWR_DV23";
+		regulator-boot-on;
 		gpio = <&gpio GPIODV_23 GPIO_ACTIVE_LOW>;
 		vin-supply = <&panel_vdd>;
 		startup-delay-us = <170000>;	/* 20 ms + GPIODV_8 low 150 ms */
@@ -240,6 +251,7 @@
 	panel_pwr: regulator-panel-en {
 		compatible = "regulator-fixed";
 		regulator-name = "LCD_EN_DV8";
+		regulator-boot-on;
 		gpio = <&gpio GPIODV_8 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 		vin-supply = <&panel_vdd2>;
@@ -459,12 +471,15 @@
 	 * reg1 = 0x28 (SYNC, OVP 35.5 V), which is also the mainline
 	 * driver default. The vendor never uses dimming steps above 23
 	 * (24 on EDT glass); the mainline driver exposes 0..31.
+	 * default-brightness: the step U-Boot leaves (vendor level 128 of
+	 * 1..255 on the 1..23 / 2..24 dimming range: 12, 13 on EDT glass), so
+	 * the probe does not change the brightness of the U-Boot logo.
 	 */
 	backlight: backlight@17 {
 		compatible = "mps,mp3309c";
 		reg = <0x17>;
 		enable-gpios = <&gpio GPIODV_28 GPIO_ACTIVE_HIGH>;
-		default-brightness = <16>;
+		default-brightness = <13>;
 	};
 
 	/* vendor touch_ft5x06: irq GPIOX_21, reset GPIODV_0 */
