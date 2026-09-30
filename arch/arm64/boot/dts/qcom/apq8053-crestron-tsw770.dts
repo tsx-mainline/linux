@@ -16,6 +16,10 @@
 	firmware-name = "qcom/apq8053/crestron/tswxx70/a506_zap.mbn";
 };
 
+&lpass {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/adsp.mbn";
+};
+
 &panel {
 	compatible = "crestron,tswxx70-jd9366-edt", "jadard,jd9365da-h3";
 };
