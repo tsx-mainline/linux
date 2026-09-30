@@ -120,6 +120,10 @@
 
 /* General Purpose IO Configuration Register */
 #define GPIO_CFG		(0x28)
+#define GPIO_CFG_GPEN(n)	BIT(24 + (n))	/* 0: pin is a GPIO */
+#define GPIO_CFG_GPBUF(n)	BIT(16 + (n))	/* 1: push-pull output */
+#define GPIO_CFG_GPDIR(n)	BIT(8 + (n))	/* 1: output */
+#define GPIO_CFG_GPDATA(n)	BIT(n)
 
 /* Automatic Flow Control Configuration Register */
 #define AFC_CFG			(0x2C)

@@ -7,6 +7,7 @@
 
 #include <linux/module.h>
 #include <linux/kmod.h>
+#include <linux/gpio/driver.h>
 #include <linux/netdevice.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
@@ -76,7 +77,13 @@ struct smsc95xx_priv {
 	struct mii_bus *mdiobus;
 	struct phy_device *phydev;
 	struct task_struct *pm_task;
+	struct gpio_chip gpio;
+	struct mutex gpio_lock; /* protects gpio_cfg */
+	u32 gpio_cfg;
 };
+
+/* LAN9512/LAN9514: GPIO_CFG bits 0-4 control the pins GPIO3-GPIO7 */
+#define SMSC95XX_LAN9512_NGPIO	5
 
 static bool turbo_mode = true;
 module_param(turbo_mode, bool, 0644);
@@ -937,6 +944,141 @@ static int smsc95xx_start_rx_path(struct usbnet *dev)
 	return smsc95xx_write_reg(dev, MAC_CR, pdata->mac_cr);
 }
 
+static int smsc95xx_gpio_update(struct usbnet *dev, u32 clear, u32 set)
+{
+	struct smsc95xx_priv *pdata = dev->driver_priv;
+	u32 val;
+	int ret;
+
+	guard(mutex)(&pdata->gpio_lock);
+
+	val = (pdata->gpio_cfg & ~clear) | set;
+	ret = smsc95xx_write_reg(dev, GPIO_CFG, val);
+	if (ret < 0)
+		return ret;
+
+	pdata->gpio_cfg = val;
+
+	return 0;
+}
+
+static int smsc95xx_gpio_get_direction(struct gpio_chip *gc,
+				       unsigned int offset)
+{
+	struct usbnet *dev = gpiochip_get_data(gc);
+	struct smsc95xx_priv *pdata = dev->driver_priv;
+
+	guard(mutex)(&pdata->gpio_lock);
+
+	if (pdata->gpio_cfg & GPIO_CFG_GPDIR(offset))
+		return GPIO_LINE_DIRECTION_OUT;
+
+	return GPIO_LINE_DIRECTION_IN;
+}
+
+static int smsc95xx_gpio_direction_input(struct gpio_chip *gc,
+					 unsigned int offset)
+{
+	struct usbnet *dev = gpiochip_get_data(gc);
+
+	return smsc95xx_gpio_update(dev, GPIO_CFG_GPEN(offset) |
+				    GPIO_CFG_GPDIR(offset), 0);
+}
+
+static int smsc95xx_gpio_direction_output(struct gpio_chip *gc,
+					  unsigned int offset, int value)
+{
+	struct usbnet *dev = gpiochip_get_data(gc);
+	u32 set = GPIO_CFG_GPBUF(offset) | GPIO_CFG_GPDIR(offset);
+
+	if (value)
+		set |= GPIO_CFG_GPDATA(offset);
+
+	return smsc95xx_gpio_update(dev, GPIO_CFG_GPEN(offset) |
+				    GPIO_CFG_GPDATA(offset), set);
+}
+
+static int smsc95xx_gpio_get(struct gpio_chip *gc, unsigned int offset)
+{
+	struct usbnet *dev = gpiochip_get_data(gc);
+	u32 val;
+	int ret;
+
+	ret = smsc95xx_read_reg(dev, GPIO_CFG, &val);
+	if (ret < 0)
+		return ret;
+
+	return !!(val & GPIO_CFG_GPDATA(offset));
+}
+
+static int smsc95xx_gpio_set(struct gpio_chip *gc, unsigned int offset,
+			     int value)
+{
+	struct usbnet *dev = gpiochip_get_data(gc);
+
+	return smsc95xx_gpio_update(dev, GPIO_CFG_GPDATA(offset),
+				    value ? GPIO_CFG_GPDATA(offset) : 0);
+}
+
+static int smsc95xx_gpio_init(struct usbnet *dev, unsigned int ngpio)
+{
+	struct smsc95xx_priv *pdata = dev->driver_priv;
+	struct gpio_chip *gc = &pdata->gpio;
+	struct device *ddev = &dev->udev->dev;
+	unsigned int i;
+	u32 val, init;
+	int ret;
+
+	ret = smsc95xx_read_reg(dev, GPIO_CFG, &val);
+	if (ret < 0)
+		return ret;
+
+	/* The board can ask for some lines to start as high outputs. */
+	if (!device_property_read_u32(ddev, "lines-initial-states", &init)) {
+		for (i = 0; i < ngpio; i++) {
+			if (!(init & BIT(i)))
+				continue;
+			val &= ~GPIO_CFG_GPEN(i);
+			val |= GPIO_CFG_GPBUF(i) | GPIO_CFG_GPDIR(i) |
+			       GPIO_CFG_GPDATA(i);
+		}
+
+		ret = smsc95xx_write_reg(dev, GPIO_CFG, val);
+		if (ret < 0)
+			return ret;
+	}
+
+	pdata->gpio_cfg = val;
+
+	gc->label = SMSC_CHIPNAME;
+	/* The device node of a hard-wired LAN95xx gives the line names. */
+	gc->parent = ddev;
+	gc->owner = THIS_MODULE;
+	gc->base = -1;
+	gc->ngpio = ngpio;
+	gc->can_sleep = true;
+	gc->get_direction = smsc95xx_gpio_get_direction;
+	gc->direction_input = smsc95xx_gpio_direction_input;
+	gc->direction_output = smsc95xx_gpio_direction_output;
+	gc->get = smsc95xx_gpio_get;
+	gc->set = smsc95xx_gpio_set;
+
+	return gpiochip_add_data(gc, dev);
+}
+
+/* A Lite Reset sets GPIO_CFG back to its default: restore the GPIO state. */
+static int smsc95xx_gpio_restore(struct usbnet *dev)
+{
+	struct smsc95xx_priv *pdata = dev->driver_priv;
+
+	if (!pdata->gpio.ngpio)
+		return 0;
+
+	guard(mutex)(&pdata->gpio_lock);
+
+	return smsc95xx_write_reg(dev, GPIO_CFG, pdata->gpio_cfg);
+}
+
 static int smsc95xx_reset(struct usbnet *dev)
 {
 	struct smsc95xx_priv *pdata = dev->driver_priv;
@@ -962,6 +1104,10 @@ static int smsc95xx_reset(struct usbnet *dev)
 		netdev_warn(dev->net, "timeout waiting for completion of Lite Reset\n");
 		return -ETIMEDOUT;
 	}
+
+	ret = smsc95xx_gpio_restore(dev);
+	if (ret < 0)
+		return ret;
 
 	ret = smsc95xx_set_mac_address(dev);
 	if (ret < 0)
@@ -1175,6 +1321,7 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	dev->driver_priv = pdata;
 
 	spin_lock_init(&pdata->mac_cr_lock);
+	mutex_init(&pdata->gpio_lock);
 
 	/* LAN95xx devices do not alter the computed checksum of 0 to 0xffff.
 	 * RFC 2460, ipv6 UDP calculated checksum yields a result of zero must
@@ -1280,6 +1427,14 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 	else if (val == ID_REV_CHIP_ID_9512_)
 		pdata->features = FEATURE_8_WAKEUP_FILTERS;
 
+	if (val == ID_REV_CHIP_ID_9512_) {
+		ret = smsc95xx_gpio_init(dev, SMSC95XX_LAN9512_NGPIO);
+		if (ret) {
+			netdev_err(dev->net, "Could not register GPIO chip\n");
+			goto unregister_mdio;
+		}
+	}
+
 	dev->net->netdev_ops = &smsc95xx_netdev_ops;
 	dev->net->ethtool_ops = &smsc95xx_ethtool_ops;
 	dev->net->flags |= IFF_MULTICAST;
@@ -1298,12 +1453,16 @@ static int smsc95xx_bind(struct usbnet *dev, struct usb_interface *intf)
 				 PHY_INTERFACE_MODE_MII);
 	if (ret) {
 		netdev_err(dev->net, "can't attach PHY to %s\n", pdata->mdiobus->id);
-		goto unregister_mdio;
+		goto remove_gpio;
 	}
 
 	phy_attached_info(dev->net->phydev);
 
 	return 0;
+
+remove_gpio:
+	if (pdata->gpio.ngpio)
+		gpiochip_remove(&pdata->gpio);
 
 unregister_mdio:
 	mdiobus_unregister(pdata->mdiobus);
@@ -1330,6 +1489,8 @@ static void smsc95xx_unbind(struct usbnet *dev, struct usb_interface *intf)
 	struct smsc95xx_priv *pdata = dev->driver_priv;
 
 	phy_disconnect(dev->net->phydev);
+	if (pdata->gpio.ngpio)
+		gpiochip_remove(&pdata->gpio);
 	mdiobus_unregister(pdata->mdiobus);
 	mdiobus_free(pdata->mdiobus);
 	irq_dispose_mapping(irq_find_mapping(pdata->irqdomain, PHY_HWIRQ));
