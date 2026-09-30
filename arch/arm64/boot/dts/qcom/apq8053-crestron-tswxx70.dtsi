@@ -1,0 +1,332 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Common parts of the Crestron TSW-570/770/1070 touch panels.
+ *
+ * APQ8053 + PM8953 (the PMI8950 of the reference design is not fitted),
+ * eMMC, Pronto/WCN3680 Wi-Fi/BT, WCD9335 codec on SLIMbus, and a
+ * Microchip LAN9512 USB hub + Ethernet hard-wired to the only USB controller.
+ * The panel, touch controller and lightbar LED drivers vary by SKU.
+ */
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "msm8953.dtsi"
+#include "pm8953.dtsi"
+
+/* No modem: frees ~106 MiB. */
+/delete-node/ &mpss_mem;
+/delete-node/ &mba_mem;
+
+/ {
+	chassis-type = "embedded";
+
+	qcom,msm-id = <QCOM_ID_APQ8053 0>;
+	qcom,board-id = <QCOM_BOARD_ID_QRD 0>;
+
+	aliases {
+		mmc0 = &sdhc_1;
+		serial0 = &uart_0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-0 = <&gpio_key_default>;
+		pinctrl-names = "default";
+
+		/* Not reachable from outside; probably a test pad. */
+		key-setup {
+			label = "Setup";
+			gpios = <&tlmm 85 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <15>;
+		};
+	};
+
+	reserved-memory {
+		/* Only used by the modem. */
+		/delete-node/ rmtfs@f2d00000;
+	};
+
+	/* Board is powered from PoE or a DC input; there is no battery. */
+	vph_pwr: vph-pwr-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&hsusb_phy {
+	vdd-supply = <&pm8953_l3>;
+	vdda-pll-supply = <&pm8953_l7>;
+	vdda-phy-dpdm-supply = <&pm8953_l13>;
+
+	status = "okay";
+};
+
+&i2c_3 {
+	clock-frequency = <400000>;
+
+	status = "okay";
+
+	touchscreen: touchscreen@38 {
+		compatible = "hycon,hy4635";
+		reg = <0x38>;
+
+		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
+		/* Inverted on the board: GPIO64 high holds the controller in reset. */
+		reset-gpios = <&tlmm 64 GPIO_ACTIVE_HIGH>;
+
+		/* Downstream also lists avdd (L5) and I2C pull-ups (L6), both always on here. */
+		vcc-supply = <&pm8953_l10>;
+
+		pinctrl-0 = <&touch_default>;
+		pinctrl-names = "default";
+	};
+};
+
+&mpss {
+	/delete-node/ mba;
+	/delete-node/ mpss;
+};
+
+&pm8953_pon {
+	/* There is no power key. */
+	pwrkey {
+		status = "disabled";
+	};
+};
+
+/* Rear reset pinhole. */
+&pm8953_resin {
+	linux,code = <KEY_RESTART>;
+
+	status = "okay";
+};
+
+&rpm_requests {
+	regulators {
+		compatible = "qcom,rpm-pm8953-regulators";
+		vdd_s1-supply = <&vph_pwr>;
+		vdd_s2-supply = <&vph_pwr>;
+		vdd_s3-supply = <&vph_pwr>;
+		vdd_s4-supply = <&vph_pwr>;
+		vdd_s5-supply = <&vph_pwr>;
+		vdd_s6-supply = <&vph_pwr>;
+		vdd_s7-supply = <&vph_pwr>;
+		vdd_l1-supply = <&pm8953_s3>;
+		vdd_l2_l3-supply = <&pm8953_s3>;
+		vdd_l4_l5_l6_l7_l16_l19-supply = <&pm8953_s4>;
+		vdd_l8_l11_l12_l13_l14_l15-supply = <&vph_pwr>;
+		vdd_l9_l10_l17_l18_l22-supply = <&vph_pwr>;
+		vdd_l23-supply = <&pm8953_s3>;
+
+		pm8953_s1: s1 {
+			regulator-min-microvolt = <870000>;
+			regulator-max-microvolt = <1156000>;
+		};
+
+		/*
+		 * S3, L3 and L6 feed the DSI PHY and panel I/O. Keep them on so
+		 * the bootloader's framebuffer (simplefb) survives until there is
+		 * a panel driver.
+		 */
+		pm8953_s3: s3 {
+			regulator-min-microvolt = <1224000>;
+			regulator-max-microvolt = <1224000>;
+			regulator-always-on;
+		};
+
+		pm8953_s4: s4 {
+			regulator-min-microvolt = <1900000>;
+			regulator-max-microvolt = <2050000>;
+		};
+
+		pm8953_l1: l1 {
+			regulator-min-microvolt = <1000000>;
+			regulator-max-microvolt = <1100000>;
+		};
+
+		pm8953_l2: l2 {
+			regulator-min-microvolt = <975000>;
+			regulator-max-microvolt = <1225000>;
+			regulator-always-on;
+		};
+
+		pm8953_l3: l3 {
+			regulator-min-microvolt = <925000>;
+			regulator-max-microvolt = <925000>;
+			regulator-always-on;
+		};
+
+		pm8953_l4: l4 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
+		pm8953_l5: l5 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
+		pm8953_l6: l6 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-always-on;
+		};
+
+		pm8953_l7: l7 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1900000>;
+		};
+
+		pm8953_l8: l8 {
+			regulator-min-microvolt = <2900000>;
+			regulator-max-microvolt = <2900000>;
+		};
+
+		pm8953_l9: l9 {
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3300000>;
+		};
+
+		pm8953_l10: l10 {
+			regulator-min-microvolt = <2850000>;
+			regulator-max-microvolt = <2850000>;
+		};
+
+		pm8953_l11: l11 {
+			regulator-min-microvolt = <2950000>;
+			regulator-max-microvolt = <2950000>;
+		};
+
+		pm8953_l12: l12 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2950000>;
+		};
+
+		pm8953_l13: l13 {
+			regulator-min-microvolt = <3125000>;
+			regulator-max-microvolt = <3125000>;
+		};
+
+		pm8953_l16: l16 {
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		pm8953_l17: l17 {
+			regulator-min-microvolt = <2850000>;
+			regulator-max-microvolt = <2850000>;
+		};
+
+		pm8953_l19: l19 {
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1350000>;
+		};
+
+		pm8953_l22: l22 {
+			regulator-always-on;
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <2850000>;
+		};
+
+		pm8953_l23: l23 {
+			regulator-min-microvolt = <975000>;
+			regulator-max-microvolt = <1225000>;
+		};
+	};
+};
+
+/* eMMC */
+&sdhc_1 {
+	vmmc-supply = <&pm8953_l8>;
+	vqmmc-supply = <&pm8953_l5>;
+
+	status = "okay";
+};
+
+&tlmm {
+	gpio_key_default: gpio-key-default-state {
+		pins = "gpio85";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	touch_default: touch-default-state {
+		reset-pins {
+			pins = "gpio64";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+		};
+
+		irq-pins {
+			pins = "gpio65";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+	};
+};
+
+/* Debug UART on test pads, GPIO4/5. */
+&uart_0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart_console_active>;
+
+	status = "okay";
+};
+
+&usb3 {
+	status = "okay";
+};
+
+/*
+ * The only USB controller is wired to an on-board LAN9512 hub; both rear
+ * USB-A ports hang off that hub. There is no device-mode connector.
+ */
+&usb3_dwc3 {
+	dr_mode = "host";
+	/delete-property/ usb-role-switch;
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	usb_hub: hub@1 {
+		compatible = "usb424,9512";
+		reg = <1>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		ethernet: ethernet@1 {
+			compatible = "usb424,ec00";
+			reg = <1>;
+		};
+	};
+};
+
+&wcnss {
+	vddpx-supply = <&pm8953_l5>;
+
+	status = "okay";
+};
+
+&wcnss_iris {
+	compatible = "qcom,wcn3680";
+
+	vddxo-supply = <&pm8953_l7>;
+	vddrfa-supply = <&pm8953_l19>;
+	vddpa-supply = <&pm8953_l9>;
+	vdddig-supply = <&pm8953_l5>;
+};

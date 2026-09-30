@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Crestron TSW-770: 7" EDT JD9366 800x1280 panel, mounted landscape.
+ * Stock bootloader SKU 10.
+ */
+/dts-v1/;
+
+#include "apq8053-crestron-tswxx70.dtsi"
+
+/ {
+	model = "Crestron TSW-770";
+	compatible = "crestron,tsw770", "crestron,tswxx70", "qcom,apq8053", "qcom,msm8953";
+};
+
+&gpu_zap_shader {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/a506_zap.mbn";
+};
+
+&touchscreen {
+	/* The controller is configured for the landscape mounting. */
+	touchscreen-size-x = <1280>;
+	touchscreen-size-y = <800>;
+};
+
+&wcnss {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/wcnss.mbn";
+};
+
+&wcnss_ctrl {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/WCNSS_qcom_wlan_nv.bin";
+};
