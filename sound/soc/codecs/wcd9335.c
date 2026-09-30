@@ -2487,6 +2487,16 @@ static const struct snd_soc_dapm_route wcd9335_audio_map[] = {
 	{"LINEOUT4 PA", NULL, "RX INT6 DAC"},
 	{"LINEOUT4", NULL, "LINEOUT4 PA"},
 
+	/* SPK1 (SoundWire) */
+	{"RX INT7 CHAIN", NULL, "RX INT7 INTERP"},
+	{"RX INT7 CHAIN", NULL, "RX_BIAS"},
+	{"SPK1 OUT", NULL, "RX INT7 CHAIN"},
+
+	/* SPK2 (SoundWire) */
+	{"RX INT8 CHAIN", NULL, "RX INT8 INTERP"},
+	{"RX INT8 CHAIN", NULL, "RX_BIAS"},
+	{"SPK2 OUT", NULL, "RX INT8 CHAIN"},
+
 	/* SLIMBUS Connections */
 	{"AIF1 CAP", NULL, "AIF1_CAP Mixer"},
 	{"AIF2 CAP", NULL, "AIF2_CAP Mixer"},
@@ -3247,6 +3257,47 @@ static int wcd9335_config_compander(struct snd_soc_component *component,
 		snd_soc_component_update_bits(component, comp_ctl0_reg,
 					WCD9335_CDC_COMPANDER_HALT_MASK,
 					WCD9335_CDC_COMPANDER_NOHALT);
+	}
+
+	return 0;
+}
+
+/* The SoundWire speaker paths (INT7, INT8) go through the boost blocks. */
+static int wcd9335_codec_spk_boost_event(struct snd_soc_dapm_widget *w,
+					 struct snd_kcontrol *kc, int event)
+{
+	struct snd_soc_component *comp = snd_soc_dapm_to_component(w->dapm);
+	u16 boost_path_ctl, boost_path_cfg1, reg, reg_mix;
+
+	if (!snd_soc_dapm_widget_name_cmp(w, "RX INT7 CHAIN")) {
+		boost_path_ctl = WCD9335_CDC_BOOST0_BOOST_PATH_CTL;
+		boost_path_cfg1 = WCD9335_CDC_RX7_RX_PATH_CFG1;
+		reg = WCD9335_CDC_RX7_RX_PATH_CTL;
+		reg_mix = WCD9335_CDC_RX7_RX_PATH_MIX_CTL;
+	} else if (!snd_soc_dapm_widget_name_cmp(w, "RX INT8 CHAIN")) {
+		boost_path_ctl = WCD9335_CDC_BOOST1_BOOST_PATH_CTL;
+		boost_path_cfg1 = WCD9335_CDC_RX8_RX_PATH_CFG1;
+		reg = WCD9335_CDC_RX8_RX_PATH_CTL;
+		reg_mix = WCD9335_CDC_RX8_RX_PATH_MIX_CTL;
+	} else {
+		return -EINVAL;
+	}
+
+	switch (event) {
+	case SND_SOC_DAPM_PRE_PMU:
+		snd_soc_component_update_bits(comp, boost_path_ctl,
+					      WCD9335_CDC_BOOST_PATH_CLK_EN,
+					      WCD9335_CDC_BOOST_PATH_CLK_EN);
+		snd_soc_component_update_bits(comp, boost_path_cfg1, 0x01, 0x01);
+		/* Unmute the main and the mix path */
+		snd_soc_component_update_bits(comp, reg, 0x10, 0x00);
+		snd_soc_component_update_bits(comp, reg_mix, 0x10, 0x00);
+		break;
+	case SND_SOC_DAPM_POST_PMD:
+		snd_soc_component_update_bits(comp, boost_path_cfg1, 0x01, 0x00);
+		snd_soc_component_update_bits(comp, boost_path_ctl,
+					      WCD9335_CDC_BOOST_PATH_CLK_EN, 0);
+		break;
 	}
 
 	return 0;
@@ -4286,7 +4337,6 @@ static int wcd9335_codec_enable_mclk(struct snd_soc_dapm_widget *w,
 }
 
 static const struct snd_soc_dapm_widget wcd9335_dapm_widgets[] = {
-	/* TODO SPK1 & SPK2 OUT*/
 	SND_SOC_DAPM_OUTPUT("EAR"),
 	SND_SOC_DAPM_OUTPUT("HPHL"),
 	SND_SOC_DAPM_OUTPUT("HPHR"),
@@ -4294,6 +4344,15 @@ static const struct snd_soc_dapm_widget wcd9335_dapm_widgets[] = {
 	SND_SOC_DAPM_OUTPUT("LINEOUT2"),
 	SND_SOC_DAPM_OUTPUT("LINEOUT3"),
 	SND_SOC_DAPM_OUTPUT("LINEOUT4"),
+	/* To the SoundWire speaker amplifiers */
+	SND_SOC_DAPM_OUTPUT("SPK1 OUT"),
+	SND_SOC_DAPM_OUTPUT("SPK2 OUT"),
+	SND_SOC_DAPM_MIXER_E("RX INT7 CHAIN", SND_SOC_NOPM, 0, 0, NULL, 0,
+			     wcd9335_codec_spk_boost_event,
+			     SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
+	SND_SOC_DAPM_MIXER_E("RX INT8 CHAIN", SND_SOC_NOPM, 0, 0, NULL, 0,
+			     wcd9335_codec_spk_boost_event,
+			     SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 	SND_SOC_DAPM_AIF_IN_E("AIF1 PB", "AIF1 Playback", 0, SND_SOC_NOPM,
 				AIF1_PB, 0, wcd9335_codec_enable_slim,
 				SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_POST_PMD),
