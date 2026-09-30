@@ -29,6 +29,15 @@ properties:
 
   vdd-supply: true
 
+  st,distance-mode:
+    description:
+      VL53L1X ranging mode. "long" ranges up to 4 m in the dark. "short"
+      ranges up to 1.3 m and is more robust against ambient light and a
+      cover window.
+    $ref: /schemas/types.yaml#/definitions/string
+    enum: [short, long]
+    default: long
+
 required:
   - compatible
   - reg
@@ -42,6 +51,9 @@ allOf:
     then:
       required:
         - vdd-supply
+    else:
+      properties:
+        st,distance-mode: false
 
 additionalProperties: false
 
