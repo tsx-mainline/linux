@@ -117,10 +117,13 @@
 #define SWRM_DP_PORT_CTRL_EN_CHAN_SHFT				0x18
 #define SWRM_DP_PORT_CTRL_OFFSET2_SHFT				0x10
 #define SWRM_DP_PORT_CTRL_OFFSET1_SHFT				0x08
-#define SWRM_AHB_BRIDGE_WR_DATA_0				0xc85
-#define SWRM_AHB_BRIDGE_WR_ADDR_0				0xc89
-#define SWRM_AHB_BRIDGE_RD_ADDR_0				0xc8d
-#define SWRM_AHB_BRIDGE_RD_DATA_0				0xc91
+/* AHB bridge of a controller inside a codec, from the bridge base */
+#define SWRM_AHB_BRIDGE_WR_DATA_0				0x0
+#define SWRM_AHB_BRIDGE_WR_ADDR_0				0x4
+#define SWRM_AHB_BRIDGE_RD_ADDR_0				0x8
+#define SWRM_AHB_BRIDGE_RD_DATA_0				0xc
+/* Bridge base of the WCD934x, for device trees without a reg property */
+#define SWRM_AHB_BRIDGE_DEFAULT_BASE				0xc85
 
 #define SWRM_REG_VAL_PACK(data, dev, id, reg)	\
 			((reg) | ((id) << 16) | ((dev) << 20) | ((data) << 24))
@@ -178,6 +181,7 @@ struct qcom_swrm_ctrl {
 	struct sdw_bus bus;
 	struct device *dev;
 	struct regmap *regmap;
+	u32 ahb_base;
 	u32 max_reg;
 	const unsigned int *reg_layout;
 	void __iomem *mmio;
@@ -284,12 +288,14 @@ static int qcom_swrm_ahb_reg_read(struct qcom_swrm_ctrl *ctrl, int reg,
 	int ret;
 
 	/* pg register + offset */
-	ret = regmap_bulk_write(wcd_regmap, SWRM_AHB_BRIDGE_RD_ADDR_0,
-			  (u8 *)&reg, 4);
+	ret = regmap_bulk_write(wcd_regmap,
+				ctrl->ahb_base + SWRM_AHB_BRIDGE_RD_ADDR_0,
+				(u8 *)&reg, 4);
 	if (ret < 0)
 		return SDW_CMD_FAIL;
 
-	ret = regmap_bulk_read(wcd_regmap, SWRM_AHB_BRIDGE_RD_DATA_0,
+	ret = regmap_bulk_read(wcd_regmap,
+			       ctrl->ahb_base + SWRM_AHB_BRIDGE_RD_DATA_0,
 			       val, 4);
 	if (ret < 0)
 		return SDW_CMD_FAIL;
@@ -303,14 +309,16 @@ static int qcom_swrm_ahb_reg_write(struct qcom_swrm_ctrl *ctrl,
 	struct regmap *wcd_regmap = ctrl->regmap;
 	int ret;
 	/* pg register + offset */
-	ret = regmap_bulk_write(wcd_regmap, SWRM_AHB_BRIDGE_WR_DATA_0,
-			  (u8 *)&val, 4);
+	ret = regmap_bulk_write(wcd_regmap,
+				ctrl->ahb_base + SWRM_AHB_BRIDGE_WR_DATA_0,
+				(u8 *)&val, 4);
 	if (ret)
 		return SDW_CMD_FAIL;
 
 	/* write address register */
-	ret = regmap_bulk_write(wcd_regmap, SWRM_AHB_BRIDGE_WR_ADDR_0,
-			  (u8 *)&reg, 4);
+	ret = regmap_bulk_write(wcd_regmap,
+				ctrl->ahb_base + SWRM_AHB_BRIDGE_WR_ADDR_0,
+				(u8 *)&reg, 4);
 	if (ret)
 		return SDW_CMD_FAIL;
 
@@ -1511,6 +1519,10 @@ static int qcom_swrm_probe(struct platform_device *pdev)
 		ctrl->regmap = dev_get_regmap(dev->parent, NULL);
 		if (!ctrl->regmap)
 			return -EINVAL;
+
+		/* The codec register of the bridge, for example 0xc85 */
+		if (of_property_read_u32(dev->of_node, "reg", &ctrl->ahb_base))
+			ctrl->ahb_base = SWRM_AHB_BRIDGE_DEFAULT_BASE;
 	} else {
 		ctrl->reg_read = qcom_swrm_cpu_reg_read;
 		ctrl->reg_write = qcom_swrm_cpu_reg_write;
