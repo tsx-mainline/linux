@@ -58,6 +58,43 @@
 		};
 	};
 
+	/*
+	 * Bitbang on the pins of &i2c_4: TZ protects that BLSP instance
+	 * because the stock firmware reads these sensors through the ADSP.
+	 * The GPIOs are not protected.
+	 */
+	i2c-sensors {
+		compatible = "i2c-gpio";
+		sda-gpios = <&tlmm 14 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&tlmm 15 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>; /* ~100 kHz */
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		proximity@29 {
+			compatible = "st,vl53l1x";
+			reg = <0x29>;
+
+			interrupts-extended = <&tlmm 43 IRQ_TYPE_EDGE_RISING>;
+			/* XSHUT: low keeps the sensor in hardware standby. */
+			reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
+			vdd-supply = <&pm8953_l10>;
+
+			pinctrl-0 = <&proximity_default>;
+			pinctrl-names = "default";
+		};
+
+		light-sensor@44 {
+			compatible = "ti,opt3001";
+			reg = <0x44>;
+
+			interrupts-extended = <&tlmm 44 IRQ_TYPE_EDGE_FALLING>;
+
+			pinctrl-0 = <&light_sensor_default>;
+			pinctrl-names = "default";
+		};
+	};
+
 	reserved-memory {
 		/* Only used by the modem. */
 		/delete-node/ rmtfs@f2d00000;
@@ -349,6 +386,13 @@
 		bias-pull-up;
 	};
 
+	light_sensor_default: light-sensor-default-state {
+		pins = "gpio44";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
 	panel_default: panel-default-state {
 		pins = "gpio61";
 		function = "gpio";
@@ -361,6 +405,22 @@
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-down;
+	};
+
+	proximity_default: proximity-default-state {
+		irq-pins {
+			pins = "gpio43";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-pull-up;
+		};
+
+		xshut-pins {
+			pins = "gpio47";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+		};
 	};
 
 	touch_default: touch-default-state {
