@@ -11,6 +11,7 @@
 #include <dt-bindings/arm/qcom,ids.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include "msm8953.dtsi"
 #include "pm8953.dtsi"
 
@@ -111,6 +112,22 @@
 		vin-supply = <&vph_pwr>;
 	};
 
+	/*
+	 * The 1.8 V rails of the WCD9335 codec. Downstream calls this
+	 * regulator "eldo2" and keeps it on.
+	 */
+	codec_1p8: codec-1p8-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "codec_1p8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&tlmm 50 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		pinctrl-0 = <&codec_1p8_default>;
+		pinctrl-names = "default";
+	};
+
 	/* Board is powered from PoE or a DC input; there is no battery. */
 	vph_pwr: vph-pwr-regulator {
 		compatible = "regulator-fixed";
@@ -203,6 +220,18 @@
 &mpss {
 	/delete-node/ mba;
 	/delete-node/ mpss;
+};
+
+&pm8953_gpios {
+	/* RPM divider clock 2 (9.6 MHz): MCLK of the WCD9335 codec. */
+	codec_mclk_default: codec-mclk-default-state {
+		pins = "gpio1";
+		function = PMIC_GPIO_FUNC_FUNC1;
+		power-source = <0>;
+		qcom,drive-strength = <PMIC_GPIO_STRENGTH_MED>;
+		bias-disable;
+		output-low;
+	};
 };
 
 &pm8953_mpps {
@@ -384,7 +413,81 @@
 	status = "okay";
 };
 
+&slim {
+	status = "okay";
+
+	slim@1 {
+		reg = <1>;
+		#address-cells = <2>;
+		#size-cells = <0>;
+
+		codec_ifd: ifd@0,0 {
+			compatible = "slim217,1a0";
+			reg = <0 0>;
+		};
+
+		codec: codec@1,0 {
+			compatible = "slim217,1a0";
+			reg = <1 0>;
+
+			/*
+			 * INTR2 is not connected. The mclk rate comes from
+			 * the PMIC divider. "slimbus" is not used by the
+			 * driver.
+			 */
+			clocks = <&rpmcc RPM_SMD_DIV_CLK2>,
+				 <&rpmcc RPM_SMD_BB_CLK1>;
+			clock-names = "mclk", "slimbus";
+			interrupts-extended = <&tlmm 73 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr1";
+			interrupt-controller;
+			#interrupt-cells = <1>;
+
+			reset-gpios = <&tlmm 124 GPIO_ACTIVE_LOW>;
+			slim-ifc-dev = <&codec_ifd>;
+
+			vdd-buck-supply = <&codec_1p8>;
+			vdd-buck-sido-supply = <&codec_1p8>;
+			vdd-tx-supply = <&codec_1p8>;
+			vdd-rx-supply = <&codec_1p8>;
+			vdd-io-supply = <&codec_1p8>;
+			vdd-micbias-supply = <&pm8953_l13>;
+
+			pinctrl-0 = <&codec_mclk_default>, <&codec_reset_default>,
+				    <&codec_intr_default>;
+			pinctrl-names = "default";
+
+			#sound-dai-cells = <1>;
+		};
+	};
+};
+
+&slimbam {
+	status = "okay";
+};
+
 &tlmm {
+	codec_1p8_default: codec-1p8-default-state {
+		pins = "gpio50";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	codec_intr_default: codec-intr-default-state {
+		pins = "gpio73";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	codec_reset_default: codec-reset-default-state {
+		pins = "gpio124";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
 	gpio_key_default: gpio-key-default-state {
 		pins = "gpio85";
 		function = "gpio";
