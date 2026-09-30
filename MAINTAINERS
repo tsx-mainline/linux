@@ -24426,6 +24426,7 @@ ST VL53L1X ToF RANGER(I2C) IIO DRIVER
 M:	Siratul Islam <siratul.islam@linux.dev>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
+F:	Documentation/ABI/testing/sysfs-bus-iio-proximity-vl53l1x
 F:	Documentation/devicetree/bindings/iio/proximity/st,vl53l0x.yaml
 F:	drivers/iio/proximity/vl53l1x-i2c.c
 
