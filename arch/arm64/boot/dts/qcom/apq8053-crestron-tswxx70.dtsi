@@ -79,6 +79,8 @@
 			/* XSHUT: low keeps the sensor in hardware standby. */
 			reset-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
 			vdd-supply = <&pm8953_l10>;
+			/* Behind the front window; the stock firmware uses short mode too. */
+			st,distance-mode = "short";
 
 			pinctrl-0 = <&proximity_default>;
 			pinctrl-names = "default";
