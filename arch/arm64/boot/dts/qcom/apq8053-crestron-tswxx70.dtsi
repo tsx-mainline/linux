@@ -33,6 +33,16 @@
 		stdout-path = "serial0:115200n8";
 	};
 
+	/* PM8953 PWM, routed through DTEST2 to MPP4, 5 kHz like downstream. */
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pm8953_pwm 0 200000>;
+
+		brightness-levels = <0 4095>;
+		num-interpolated-steps = <4095>;
+		default-brightness-level = <2048>;
+	};
+
 	gpio-keys {
 		compatible = "gpio-keys";
 
@@ -114,6 +124,7 @@
 	panel: panel@0 {
 		reg = <0>;
 
+		backlight = <&backlight>;
 		/*
 		 * Inverted on the board like the touch reset: downstream's reset
 		 * sequence is low 20 ms, high 2 ms, low 20 ms.
@@ -151,11 +162,32 @@
 	/delete-node/ mpss;
 };
 
+&pm8953_mpps {
+	status = "okay";
+
+	pwm_out: mpp4-state {
+		pins = "mpp4";
+		function = "digital";
+		power-source = <3>;
+		output-low;
+		qcom,dtest = <2>;
+	};
+};
+
 &pm8953_pon {
 	/* There is no power key. */
 	pwrkey {
 		status = "disabled";
 	};
+};
+
+&pm8953_pwm {
+	qcom,dtest = <2 2>;
+
+	pinctrl-0 = <&pwm_out>;
+	pinctrl-names = "default";
+
+	status = "okay";
 };
 
 /* Rear reset pinhole. */
