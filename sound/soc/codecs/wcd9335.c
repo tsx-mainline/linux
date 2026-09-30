@@ -11,6 +11,7 @@
 #include <linux/bitops.h>
 #include <linux/regulator/consumer.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/delay.h>
 #include <linux/kernel.h>
 #include <linux/slimbus.h>
@@ -20,6 +21,7 @@
 #include <linux/gpio/consumer.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/of_platform.h>
 #include <sound/tlv.h>
 #include <sound/info.h>
 #include "wcd9335.h"
@@ -345,6 +347,11 @@ struct wcd9335_codec {
 	int dmic_0_1_clk_cnt;
 	int dmic_2_3_clk_cnt;
 	int dmic_4_5_clk_cnt;
+
+	/* Clock of the SoundWire controller */
+	struct clk_hw swr_clk;
+	/* MCLK users from DAPM and from the SoundWire controller */
+	struct mutex mclk_lock;
 };
 
 struct wcd9335_irq {
@@ -4099,20 +4106,18 @@ static void wcd9335_teardown_irqs(struct wcd9335_codec *wcd)
 static void wcd9335_cdc_sido_ccl_enable(struct wcd9335_codec *wcd,
 					bool ccl_flag)
 {
-	struct snd_soc_component *comp = wcd->component;
-
 	if (ccl_flag) {
 		if (++wcd->sido_ccl_cnt == 1)
-			snd_soc_component_write(comp, WCD9335_SIDO_SIDO_CCL_10,
-					WCD9335_SIDO_SIDO_CCL_DEF_VALUE);
+			regmap_write(wcd->regmap, WCD9335_SIDO_SIDO_CCL_10,
+				     WCD9335_SIDO_SIDO_CCL_DEF_VALUE);
 	} else {
 		if (wcd->sido_ccl_cnt == 0) {
 			dev_err(wcd->dev, "sido_ccl already disabled\n");
 			return;
 		}
 		if (--wcd->sido_ccl_cnt == 0)
-			snd_soc_component_write(comp, WCD9335_SIDO_SIDO_CCL_10,
-				WCD9335_SIDO_SIDO_CCL_10_ICHARG_PWR_SEL_C320FF);
+			regmap_write(wcd->regmap, WCD9335_SIDO_SIDO_CCL_10,
+				     WCD9335_SIDO_SIDO_CCL_10_ICHARG_PWR_SEL_C320FF);
 	}
 }
 
@@ -4234,13 +4239,15 @@ static int wcd9335_cdc_req_mclk_enable(struct wcd9335_codec *wcd,
 {
 	int ret = 0;
 
+	guard(mutex)(&wcd->mclk_lock);
+
 	if (enable) {
 		wcd9335_cdc_sido_ccl_enable(wcd, true);
 		ret = clk_prepare_enable(wcd->mclk);
 		if (ret) {
 			dev_err(wcd->dev, "%s: ext clk enable failed\n",
 				__func__);
-			goto err;
+			return ret;
 		}
 		/* get BG */
 		wcd9335_enable_master_bias(wcd);
@@ -4255,8 +4262,94 @@ static int wcd9335_cdc_req_mclk_enable(struct wcd9335_codec *wcd,
 		clk_disable_unprepare(wcd->mclk);
 		wcd9335_cdc_sido_ccl_enable(wcd, false);
 	}
-err:
+
 	return ret;
+}
+
+/*
+ * The clock of the SoundWire controller: the codec MCLK and the SoundWire
+ * clock gate. The controller can start before the ASoC component, so this
+ * uses the register map only.
+ */
+static int wcd9335_swr_clk_prepare(struct clk_hw *hw)
+{
+	struct wcd9335_codec *wcd = container_of(hw, struct wcd9335_codec,
+						 swr_clk);
+	int ret;
+
+	ret = wcd9335_cdc_req_mclk_enable(wcd, true);
+	if (ret)
+		return ret;
+
+	/* Ungate MCLK and set its rate, as the component init does */
+	regmap_update_bits(wcd->regmap, WCD9335_CODEC_RPM_CLK_GATE,
+			   WCD9335_CODEC_RPM_CLK_GATE_MCLK_GATE_MASK, 0);
+	regmap_update_bits(wcd->regmap, WCD9335_CODEC_RPM_CLK_MCLK_CFG,
+			   WCD9335_CODEC_RPM_CLK_MCLK_CFG_MCLK_MASK,
+			   WCD9335_CODEC_RPM_CLK_MCLK_CFG_9P6MHZ);
+
+	/*
+	 * The downstream driver clears this bit of a v2.0 codec (the only
+	 * version this driver supports) while the SoundWire clock runs.
+	 */
+	regmap_update_bits(wcd->regmap, WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			   WCD9335_NPL_DLY_TEST_1_SWR_MASK, 0);
+
+	return regmap_update_bits(wcd->regmap,
+				  WCD9335_CDC_CLK_RST_CTRL_SWR_CONTROL,
+				  WCD9335_CDC_SWR_CLK_EN_MASK,
+				  WCD9335_CDC_SWR_CLK_EN_MASK);
+}
+
+static void wcd9335_swr_clk_unprepare(struct clk_hw *hw)
+{
+	struct wcd9335_codec *wcd = container_of(hw, struct wcd9335_codec,
+						 swr_clk);
+
+	regmap_update_bits(wcd->regmap, WCD9335_CDC_CLK_RST_CTRL_SWR_CONTROL,
+			   WCD9335_CDC_SWR_CLK_EN_MASK, 0);
+	regmap_update_bits(wcd->regmap, WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			   WCD9335_NPL_DLY_TEST_1_SWR_MASK,
+			   WCD9335_NPL_DLY_TEST_1_SWR_MASK);
+	wcd9335_cdc_req_mclk_enable(wcd, false);
+}
+
+static int wcd9335_swr_clk_is_prepared(struct clk_hw *hw)
+{
+	struct wcd9335_codec *wcd = container_of(hw, struct wcd9335_codec,
+						 swr_clk);
+	unsigned int val;
+
+	if (regmap_read(wcd->regmap, WCD9335_CDC_CLK_RST_CTRL_SWR_CONTROL, &val))
+		return 0;
+
+	return val & WCD9335_CDC_SWR_CLK_EN_MASK;
+}
+
+static const struct clk_ops wcd9335_swr_clk_ops = {
+	.prepare = wcd9335_swr_clk_prepare,
+	.unprepare = wcd9335_swr_clk_unprepare,
+	.is_prepared = wcd9335_swr_clk_is_prepared,
+};
+
+static int wcd9335_register_swr_clk(struct wcd9335_codec *wcd)
+{
+	struct device *dev = wcd->dev;
+	struct clk_init_data init = {
+		.name = "wcd9335-swr",
+		.ops = &wcd9335_swr_clk_ops,
+	};
+	int ret;
+
+	of_property_read_string(dev->of_node, "clock-output-names", &init.name);
+	wcd->swr_clk.init = &init;
+
+	ret = devm_clk_hw_register(dev, &wcd->swr_clk);
+	if (ret)
+		return ret;
+
+	return devm_of_clk_add_hw_provider(dev, of_clk_hw_simple_get,
+					   &wcd->swr_clk);
 }
 
 static void wcd9335_codec_apply_sido_voltage(struct wcd9335_codec *wcd,
@@ -4972,6 +5065,7 @@ static bool wcd9335_is_volatile_register(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
 	case WCD9335_INTR_PIN1_STATUS0...WCD9335_INTR_PIN2_CLEAR3:
+	case WCD9335_SWR_AHB_BRIDGE_WR_DATA_0...WCD9335_SWR_AHB_BRIDGE_ACCESS_STATUS:
 	case WCD9335_ANA_MBHC_RESULT_3:
 	case WCD9335_ANA_MBHC_RESULT_2:
 	case WCD9335_ANA_MBHC_RESULT_1:
@@ -5030,6 +5124,11 @@ static const struct regmap_irq wcd9335_codec_irqs[] = {
 			.types_supported = IRQ_TYPE_EDGE_BOTH,
 			.type_reg_mask	= BIT(0),
 		},
+	},
+	/* INTR_REG 2 */
+	[WCD9335_IRQ_SOUNDWIRE] = {
+		.reg_offset = 2,
+		.mask = BIT(4),
 	},
 };
 
@@ -5160,6 +5259,10 @@ static int wcd9335_slim_probe(struct slim_device *slim)
 		return	-ENOMEM;
 
 	wcd->dev = dev;
+	ret = devm_mutex_init(dev, &wcd->mclk_lock);
+	if (ret)
+		return ret;
+
 	ret = wcd9335_parse_dt(wcd);
 	if (ret)
 		return ret;
@@ -5222,7 +5325,15 @@ static int wcd9335_slim_status(struct slim_device *sdev,
 
 	wcd9335_probe(wcd);
 
-	return 0;
+	/* The SoundWire controller for the speaker amplifiers */
+	if (of_property_present(dev->of_node, "#clock-cells")) {
+		ret = wcd9335_register_swr_clk(wcd);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "Failed to register the SoundWire clock\n");
+	}
+
+	return devm_of_platform_populate(dev);
 }
 
 static const struct slim_device_id wcd9335_slim_id[] = {
