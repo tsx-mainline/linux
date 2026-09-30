@@ -2675,6 +2675,29 @@
 			};
 		};
 
+		slimbam: dma-controller@c104000 {
+			compatible = "qcom,bam-v1.7.0";
+			reg = <0x0c104000 0x2a000>;
+			interrupts = <GIC_SPI 180 IRQ_TYPE_LEVEL_HIGH>;
+			#dma-cells = <1>;
+			qcom,controlled-remotely;
+			num-channels = <31>;
+			qcom,ee = <1>;
+			qcom,num-ees = <2>;
+			status = "disabled";
+		};
+
+		slim: slim-ngd@c140000 {
+			compatible = "qcom,slim-ngd-v1.5.0";
+			reg = <0x0c140000 0x2c000>;
+			interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>;
+			dmas = <&slimbam 3>, <&slimbam 4>;
+			dma-names = "rx", "tx";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
 		lpass: remoteproc@c200000 {
 			compatible = "qcom,msm8953-adsp-pil";
 			reg = <0x0c200000 0x100>;
