@@ -473,6 +473,17 @@
 		ethernet: ethernet@1 {
 			compatible = "usb424,ec00";
 			reg = <1>;
+
+			gpio-controller;
+			#gpio-cells = <2>;
+			/*
+			 * GPIO3-GPIO7. poe-plus is low when the PSE grants
+			 * PoE+ (802.3at) power. usb-power switches the power
+			 * of the rear USB ports.
+			 */
+			gpio-line-names = "poe-plus", "", "", "usb-power", "";
+			/* Power the rear USB ports from the start. */
+			lines-initial-states = <0x8>;
 		};
 	};
 };
