@@ -234,6 +234,13 @@ properties:
 
       - items:
           - enum:
+              - crestron,tsw770
+          - const: crestron,tswxx70
+          - const: qcom,apq8053
+          - const: qcom,msm8953
+
+      - items:
+          - enum:
               - lg,bullhead
               - lg,h815
               - microsoft,talkman
