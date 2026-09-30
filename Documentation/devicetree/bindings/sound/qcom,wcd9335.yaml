@@ -30,9 +30,11 @@ properties:
       - const: slimbus
 
   interrupts:
+    minItems: 1
     maxItems: 2
 
   interrupt-names:
+    minItems: 1
     items:
       - const: intr1
       - const: intr2
