@@ -4284,6 +4284,13 @@ static int wcd9335_swr_clk_prepare(struct clk_hw *hw)
 			   WCD9335_CODEC_RPM_CLK_MCLK_CFG_MCLK_MASK,
 			   WCD9335_CODEC_RPM_CLK_MCLK_CFG_9P6MHZ);
 
+	/*
+	 * The downstream driver clears this bit of a v2.0 codec (the only
+	 * version this driver supports) while the SoundWire clock runs.
+	 */
+	regmap_update_bits(wcd->regmap, WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			   WCD9335_NPL_DLY_TEST_1_SWR_MASK, 0);
+
 	return regmap_update_bits(wcd->regmap,
 				  WCD9335_CDC_CLK_RST_CTRL_SWR_CONTROL,
 				  WCD9335_CDC_SWR_CLK_EN_MASK,
@@ -4297,6 +4304,9 @@ static void wcd9335_swr_clk_unprepare(struct clk_hw *hw)
 
 	regmap_update_bits(wcd->regmap, WCD9335_CDC_CLK_RST_CTRL_SWR_CONTROL,
 			   WCD9335_CDC_SWR_CLK_EN_MASK, 0);
+	regmap_update_bits(wcd->regmap, WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			   WCD9335_NPL_DLY_TEST_1_SWR_MASK,
+			   WCD9335_NPL_DLY_TEST_1_SWR_MASK);
 	wcd9335_cdc_req_mclk_enable(wcd, false);
 }
 

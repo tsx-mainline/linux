@@ -54,6 +54,20 @@ properties:
   '#sound-dai-cells':
     const: 1
 
+  '#clock-cells':
+    const: 0
+    description:
+      The clock of the SoundWire controller of the codec.
+
+  clock-output-names:
+    maxItems: 1
+
+  '#address-cells':
+    const: 1
+
+  '#size-cells':
+    const: 1
+
   vdd-buck-supply:
     description: 1.8V buck supply
 
@@ -74,6 +88,15 @@ properties:
 
   vdd-vbat-supply:
     description: vbat supply
+
+patternProperties:
+  "^soundwire@[0-9a-f]+$":
+    type: object
+    $ref: /schemas/soundwire/qcom,soundwire.yaml#
+    description:
+      The SoundWire controller of the codec. reg is the address of its AHB
+      bridge in the codec register map (0xc29).
+    unevaluatedProperties: false
 
 required:
   - compatible
