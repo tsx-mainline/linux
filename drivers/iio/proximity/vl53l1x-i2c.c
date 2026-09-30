@@ -25,6 +25,7 @@
 #include <linux/interrupt.h>
 #include <linux/math.h>
 #include <linux/module.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
@@ -664,7 +665,12 @@ static int vl53l1x_probe(struct i2c_client *client)
 	if (ret)
 		return ret;
 
-	ret = vl53l1x_set_distance_mode(data, VL53L1X_LONG);
+	/*
+	 * Long mode ranges up to 4 m in the dark. Short mode (up to 1.3 m) is
+	 * more robust against ambient light and a cover window.
+	 */
+	ret = device_property_match_string(dev, "st,distance-mode", "short");
+	ret = vl53l1x_set_distance_mode(data, ret == 0 ? VL53L1X_SHORT : VL53L1X_LONG);
 	if (ret)
 		return ret;
 
