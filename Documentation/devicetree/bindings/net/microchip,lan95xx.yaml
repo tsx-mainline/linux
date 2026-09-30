@@ -47,6 +47,25 @@ properties:
   nvmem-cells: true
   nvmem-cell-names: true
 
+  gpio-controller: true
+
+  "#gpio-cells":
+    const: 2
+
+  gpio-line-names:
+    description:
+      Names of the GPIO lines. On the LAN9512/LAN9514, the lines are the
+      pins GPIO3 to GPIO7.
+    minItems: 1
+    maxItems: 5
+
+  lines-initial-states:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Bitmask of the GPIO lines that the driver configures as outputs driven
+      high when it binds to the device. Bit N corresponds to GPIO line N. The
+      other lines keep their reset state.
+
 required:
   - compatible
   - reg
@@ -63,5 +82,14 @@ examples:
             compatible = "usb424,9e00";
             reg = <1>;
             local-mac-address = [00 00 00 00 00 00];
+        };
+
+        ethernet@2 {
+            compatible = "usb424,ec00";
+            reg = <2>;
+            gpio-controller;
+            #gpio-cells = <2>;
+            gpio-line-names = "", "", "", "usb-power", "";
+            lines-initial-states = <0x8>;
         };
     };
