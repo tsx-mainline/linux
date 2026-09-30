@@ -138,6 +138,14 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 
+		pm8953_pwm: pwm {
+			compatible = "qcom,pm8953-pwm", "qcom,pm8916-pwm";
+
+			#pwm-cells = <2>;
+
+			status = "disabled";
+		};
+
 		spmi_regulators: regulators {
 			compatible = "qcom,pm8950-regulators";
 
