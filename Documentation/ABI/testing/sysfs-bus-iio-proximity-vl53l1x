@@ -1,0 +1,24 @@
+What:		/sys/bus/iio/devices/iio:deviceX/in_distance_crosstalk
+KernelVersion:	7.3
+Contact:	linux-iio@vger.kernel.org
+Description:
+		Crosstalk compensation of the VL53L1X, in counts per second
+		per SPAD. Crosstalk is light that goes back to the sensor
+		without a target, for example the reflection of a cover
+		window. The sensor removes this part of the signal before it
+		calculates the distance. 0 turns the compensation off.
+
+		The value is lost when the sensor is reset. User space can
+		store it and write it again after a reset.
+
+What:		/sys/bus/iio/devices/iio:deviceX/in_distance_crosstalk_calibrate
+KernelVersion:	7.3
+Contact:	linux-iio@vger.kernel.org
+Description:
+		Writing starts a crosstalk calibration. The driver averages
+		50 ranging results and then sets in_distance_crosstalk.
+
+		Write 0 when there is no target in the range of the sensor.
+		Then all of the signal is crosstalk. Or write the distance in
+		millimeters of a target in front of the sensor. The write
+		returns when the calibration is complete.

@@ -23,12 +23,17 @@
 #include <linux/err.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
+#include <linux/kstrtox.h>
+#include <linux/limits.h>
 #include <linux/math.h>
+#include <linux/math64.h>
+#include <linux/minmax.h>
 #include <linux/module.h>
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/reset.h>
+#include <linux/sysfs.h>
 #include <linux/time.h>
 #include <linux/types.h>
 
@@ -43,6 +48,9 @@
 #define VL53L1X_REG_SOFT_RESET						0x0000
 #define VL53L1X_REG_VHV_CONFIG__TIMEOUT_MACROP_LOOP_BOUND		0x0008
 #define VL53L1X_REG_VHV_CONFIG__INIT					0x000B
+#define VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_PLANE_OFFSET_KCPS	0x0016
+#define VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_X_PLANE_GRADIENT_KCPS	0x0018
+#define VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_Y_PLANE_GRADIENT_KCPS	0x001A
 #define VL53L1X_REG_DEFAULT_CONFIG					0x002D
 #define VL53L1X_REG_GPIO_HV_MUX__CTRL					0x0030
 #define VL53L1X_REG_GPIO__TIO_HV_STATUS					0x0031
@@ -61,7 +69,9 @@
 #define VL53L1X_REG_SYSTEM__INTERRUPT_CLEAR				0x0086
 #define VL53L1X_REG_SYSTEM__MODE_START					0x0087
 #define VL53L1X_REG_RESULT__RANGE_STATUS				0x0089
+#define VL53L1X_REG_RESULT__DSS_ACTUAL_EFFECTIVE_SPADS_SD0		0x008C
 #define VL53L1X_REG_RESULT__FINAL_CROSSTALK_CORRECTED_RANGE_MM_SD0	0x0096
+#define VL53L1X_REG_RESULT__PEAK_SIGNAL_RATE_MCPS_SD0	0x0098
 #define VL53L1X_REG_RESULT__OSC_CALIBRATE_VAL				0x00DE
 #define VL53L1X_REG_FIRMWARE__SYSTEM_STATUS				0x00E5
 #define VL53L1X_REG_IDENTIFICATION__MODEL_ID				0x010F
@@ -81,6 +91,13 @@
 #define VL53L1X_RANGE_STATUS_VALID	9
 
 #define VL53L1X_OSC_CALIBRATE_MASK	GENMASK(9, 0)
+
+/*
+ * Crosstalk calibration (per ST Ultra Lite Driver): average this many
+ * ranging results. The first result after the compensation is cleared
+ * can still use the old value, so it is not used.
+ */
+#define VL53L1X_XTALK_SAMPLES		50
 
 #define VL53L1X_FIRMWARE__SYSTEM_STATUS_BOOTED	BIT(0)
 #define VL53L1X_GPIO__TIO_HV_STATUS_DATA_READY	BIT(0)
@@ -110,8 +127,10 @@ static const struct regmap_range vl53l1x_volatile_ranges[] = {
 			 VL53L1X_REG_GPIO__TIO_HV_STATUS),
 	regmap_reg_range(VL53L1X_REG_RESULT__RANGE_STATUS,
 			 VL53L1X_REG_RESULT__RANGE_STATUS),
+	regmap_reg_range(VL53L1X_REG_RESULT__DSS_ACTUAL_EFFECTIVE_SPADS_SD0,
+			 VL53L1X_REG_RESULT__DSS_ACTUAL_EFFECTIVE_SPADS_SD0 + 1),
 	regmap_reg_range(VL53L1X_REG_RESULT__FINAL_CROSSTALK_CORRECTED_RANGE_MM_SD0,
-			 VL53L1X_REG_RESULT__FINAL_CROSSTALK_CORRECTED_RANGE_MM_SD0 + 1),
+			 VL53L1X_REG_RESULT__PEAK_SIGNAL_RATE_MCPS_SD0 + 1),
 	regmap_reg_range(VL53L1X_REG_RESULT__OSC_CALIBRATE_VAL,
 			 VL53L1X_REG_RESULT__OSC_CALIBRATE_VAL + 1),
 	regmap_reg_range(VL53L1X_REG_FIRMWARE__SYSTEM_STATUS,
@@ -498,11 +517,193 @@ clear_irq:
 	return ret;
 }
 
+/*
+ * The crosstalk compensation is a rate per SPAD in kcps, fixed point 7.9.
+ * User space sees counts per second per SPAD, like ST's Ultra Lite Driver.
+ */
+static int vl53l1x_set_crosstalk(struct vl53l1x_data *data, u16 xtalk_kcps)
+{
+	int ret;
+
+	ret = vl53l1x_write_u16(data,
+				VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_X_PLANE_GRADIENT_KCPS,
+				0);
+	if (ret)
+		return ret;
+
+	ret = vl53l1x_write_u16(data,
+				VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_Y_PLANE_GRADIENT_KCPS,
+				0);
+	if (ret)
+		return ret;
+
+	return vl53l1x_write_u16(data,
+				 VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_PLANE_OFFSET_KCPS,
+				 xtalk_kcps);
+}
+
+/*
+ * Crosstalk calibration of ST's Ultra Lite Driver. With a target at
+ * target_mm, the part of the signal that the target does not explain is
+ * crosstalk. With no target in range (target_mm = 0), all of the signal
+ * is crosstalk, for example the reflection of a cover window.
+ */
+static int vl53l1x_calibrate_crosstalk(struct vl53l1x_data *data,
+				       u32 target_mm)
+{
+	u64 sum_signal = 0, sum_spads = 0, sum_distance = 0, xtalk;
+	unsigned int i;
+	u16 val;
+	int ret;
+
+	ret = vl53l1x_set_crosstalk(data, 0);
+	if (ret)
+		return ret;
+
+	for (i = 0; i <= VL53L1X_XTALK_SAMPLES; i++) {
+		ret = vl53l1x_clear_irq(data);
+		if (ret)
+			return ret;
+
+		ret = vl53l1x_wait_data_ready(data);
+		if (ret)
+			return ret;
+
+		if (i == 0)
+			continue;
+
+		/* 9.7 fixed point MCPS */
+		ret = vl53l1x_read_u16(data,
+				       VL53L1X_REG_RESULT__PEAK_SIGNAL_RATE_MCPS_SD0,
+				       &val);
+		if (ret)
+			return ret;
+		sum_signal += val;
+
+		/* 8.8 fixed point */
+		ret = vl53l1x_read_u16(data,
+				       VL53L1X_REG_RESULT__DSS_ACTUAL_EFFECTIVE_SPADS_SD0,
+				       &val);
+		if (ret)
+			return ret;
+		sum_spads += val;
+
+		ret = vl53l1x_read_u16(data,
+				       VL53L1X_REG_RESULT__FINAL_CROSSTALK_CORRECTED_RANGE_MM_SD0,
+				       &val);
+		if (ret)
+			return ret;
+		sum_distance += val;
+	}
+
+	ret = vl53l1x_clear_irq(data);
+	if (ret)
+		return ret;
+
+	if (!sum_spads)
+		return -EIO;
+
+	/*
+	 * kcps per SPAD in 7.9 fixed point:
+	 * (signal / 128 * 1000) / (spads / 256) * 512
+	 */
+	xtalk = div64_u64(sum_signal * 1024000, sum_spads);
+
+	if (target_mm) {
+		u64 target_sum = (u64)target_mm * VL53L1X_XTALK_SAMPLES;
+
+		if (sum_distance >= target_sum)
+			xtalk = 0;
+		else
+			xtalk = div64_u64(xtalk * (target_sum - sum_distance),
+					  target_sum);
+	}
+
+	return vl53l1x_set_crosstalk(data, min_t(u64, xtalk, U16_MAX));
+}
+
+static ssize_t vl53l1x_crosstalk_show(struct iio_dev *indio_dev,
+				      uintptr_t private,
+				      const struct iio_chan_spec *chan,
+				      char *buf)
+{
+	struct vl53l1x_data *data = iio_priv(indio_dev);
+	u16 xtalk;
+	int ret;
+
+	ret = vl53l1x_read_u16(data,
+			       VL53L1X_REG_ALGO__CROSSTALK_COMPENSATION_PLANE_OFFSET_KCPS,
+			       &xtalk);
+	if (ret)
+		return ret;
+
+	return sysfs_emit(buf, "%u\n", (xtalk * 1000) >> 9);
+}
+
+static ssize_t vl53l1x_crosstalk_store(struct iio_dev *indio_dev,
+				       uintptr_t private,
+				       const struct iio_chan_spec *chan,
+				       const char *buf, size_t len)
+{
+	struct vl53l1x_data *data = iio_priv(indio_dev);
+	u32 cps;
+	int ret;
+
+	ret = kstrtou32(buf, 0, &cps);
+	if (ret)
+		return ret;
+
+	if (((u64)cps << 9) / 1000 > U16_MAX)
+		return -ERANGE;
+
+	ret = vl53l1x_set_crosstalk(data, ((u64)cps << 9) / 1000);
+
+	return ret ?: len;
+}
+
+static ssize_t vl53l1x_crosstalk_calibrate(struct iio_dev *indio_dev,
+					   uintptr_t private,
+					   const struct iio_chan_spec *chan,
+					   const char *buf, size_t len)
+{
+	struct vl53l1x_data *data = iio_priv(indio_dev);
+	u32 target_mm;
+	int ret;
+
+	ret = kstrtou32(buf, 0, &target_mm);
+	if (ret)
+		return ret;
+
+	if (!iio_device_claim_direct(indio_dev))
+		return -EBUSY;
+
+	ret = vl53l1x_calibrate_crosstalk(data, target_mm);
+	iio_device_release_direct(indio_dev);
+
+	return ret ?: len;
+}
+
+static const struct iio_chan_spec_ext_info vl53l1x_ext_info[] = {
+	{
+		.name = "crosstalk",
+		.shared = IIO_SEPARATE,
+		.read = vl53l1x_crosstalk_show,
+		.write = vl53l1x_crosstalk_store,
+	},
+	{
+		.name = "crosstalk_calibrate",
+		.shared = IIO_SEPARATE,
+		.write = vl53l1x_crosstalk_calibrate,
+	},
+	{ }
+};
+
 static const struct iio_chan_spec vl53l1x_channels[] = {
 	{
 		.type = IIO_DISTANCE,
 		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |
 				      BIT(IIO_CHAN_INFO_SCALE),
+		.ext_info = vl53l1x_ext_info,
 		.scan_index = 0,
 		.scan_type = {
 			.sign = 'u',
