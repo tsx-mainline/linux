@@ -2585,6 +2585,12 @@
 			#interconnect-cells = <1>;
 		};
 
+		watchdog@b017000 {
+			compatible = "qcom,apss-wdt-qcs404", "qcom,kpss-wdt";
+			reg = <0x0b017000 0x1000>;
+			clocks = <&sleep_clk>;
+		};
+
 		cpr: power-controller@b018000 {
 			compatible = "qcom,msm8953-cpr4pd";
 
