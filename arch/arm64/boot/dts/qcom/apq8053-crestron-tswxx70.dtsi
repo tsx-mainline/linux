@@ -53,6 +53,15 @@
 		/delete-node/ rmtfs@f2d00000;
 	};
 
+	/* Not switchable from the SoC: downstream leaves the panel vdd undescribed. */
+	panel_vdd: panel-vdd-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "panel_vdd";
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vph_pwr>;
+	};
+
 	/* Board is powered from PoE or a DC input; there is no battery. */
 	vph_pwr: vph-pwr-regulator {
 		compatible = "regulator-fixed";
@@ -89,6 +98,52 @@
 		pinctrl-0 = <&touch_default>;
 		pinctrl-names = "default";
 	};
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&pm8953_s3>;
+	vddio-supply = <&pm8953_l6>;
+
+	status = "okay";
+
+	/* The panel differs per SKU; each board file sets its compatible. */
+	panel: panel@0 {
+		reg = <0>;
+
+		/*
+		 * Inverted on the board like the touch reset: downstream's reset
+		 * sequence is low 20 ms, high 2 ms, low 20 ms.
+		 */
+		reset-gpios = <&tlmm 61 GPIO_ACTIVE_HIGH>;
+		vdd-supply = <&panel_vdd>;
+		vccio-supply = <&pm8953_l6>;
+
+		pinctrl-0 = <&panel_default>;
+		pinctrl-1 = <&panel_sleep>;
+		pinctrl-names = "default", "sleep";
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+};
+
+&mdss_dsi0_phy {
+	vddio-supply = <&pm8953_l6>;
+	vcca-supply = <&pm8953_l3>;
+
+	status = "okay";
 };
 
 &mpss {
@@ -260,6 +315,20 @@
 		function = "gpio";
 		drive-strength = <2>;
 		bias-pull-up;
+	};
+
+	panel_default: panel-default-state {
+		pins = "gpio61";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	panel_sleep: panel-sleep-state {
+		pins = "gpio61";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
 	};
 
 	touch_default: touch-default-state {
