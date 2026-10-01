@@ -58,6 +58,10 @@
 #define WCD9335_MCLK_CLK_9P6MHZ		9600000
 
 #define WCD9335_SLIM_CLOSE_TIMEOUT 1000
+/* Interface status of TX port p, 0 when the port is closed */
+#define WCD9335_SLIM_TX_PORT_STATUS(p) \
+	WCD9335_SLIM_PGD_PORT_INT_STATUS(WCD9335_RX_START + (p))
+#define WCD9335_SLIM_TX_CLOSE_TIMEOUT_US 100000
 #define WCD9335_SLIM_IRQ_OVERFLOW (1 << 0)
 #define WCD9335_SLIM_IRQ_UNDERFLOW (1 << 1)
 #define WCD9335_SLIM_IRQ_PORT_CLOSED (1 << 2)
@@ -1961,6 +1965,31 @@ static int wcd9335_hw_params(struct snd_pcm_substream *substream,
 	return 0;
 }
 
+/*
+ * slim_stream_unprepare() returns when the SLIMbus manager has accepted the
+ * port disconnect. The codec closes the TX port some milliseconds later.
+ * When the TX path powers down before that, the port closes with an
+ * underflow, and the next stream on the port gets only zero samples.
+ * Wait until the port is closed.
+ */
+static void wcd9335_slim_wait_tx_closed(struct wcd9335_codec *wcd,
+					struct wcd_slim_codec_dai_data *dai_data)
+{
+	struct wcd9335_slim_ch *ch;
+	unsigned int val;
+	int ret;
+
+	list_for_each_entry(ch, &dai_data->slim_ch_list, list) {
+		ret = regmap_read_poll_timeout(wcd->if_regmap,
+					       WCD9335_SLIM_TX_PORT_STATUS(ch->port),
+					       val, !val, 1000,
+					       WCD9335_SLIM_TX_CLOSE_TIMEOUT_US);
+		if (ret)
+			dev_warn(wcd->dev, "TX port %d not closed: %d, 0x%x\n",
+				 ch->port, ret, val);
+	}
+}
+
 static int wcd9335_trigger(struct snd_pcm_substream *substream, int cmd,
 			   struct snd_soc_dai *dai)
 {
@@ -1985,6 +2014,8 @@ static int wcd9335_trigger(struct snd_pcm_substream *substream, int cmd,
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
 		slim_stream_disable(dai_data->sruntime);
 		slim_stream_unprepare(dai_data->sruntime);
+		if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+			wcd9335_slim_wait_tx_closed(wcd, dai_data);
 		break;
 	default:
 		break;
