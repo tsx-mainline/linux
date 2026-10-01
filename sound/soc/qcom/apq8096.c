@@ -29,9 +29,26 @@ static int apq8096_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 					SNDRV_PCM_HW_PARAM_RATE);
 	struct snd_interval *channels = hw_param_interval(params,
 					SNDRV_PCM_HW_PARAM_CHANNELS);
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	unsigned int rx_ch[SLIM_MAX_RX_PORTS], tx_ch[SLIM_MAX_TX_PORTS];
+	unsigned int rx_ch_cnt = 0, tx_ch_cnt = 0, ports;
 
 	rate->min = rate->max = 48000;
 	channels->min = channels->max = 2;
+
+	/*
+	 * A SLIMbus codec carries one channel per port that the mixer routes
+	 * to the DAI (WCD9335: the SLIM RX and TX MUX controls). Give the
+	 * back end that many channels, for example one for a single speaker.
+	 */
+	if (!snd_soc_dai_get_channel_map(codec_dai, &tx_ch_cnt, tx_ch,
+					 &rx_ch_cnt, rx_ch)) {
+		ports = rx_ch_cnt ? rx_ch_cnt : tx_ch_cnt;
+		if (ports) {
+			channels->min = ports;
+			channels->max = ports;
+		}
+	}
 
 	return 0;
 }
