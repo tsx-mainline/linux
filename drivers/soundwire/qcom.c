@@ -1793,17 +1793,24 @@ static int __maybe_unused swrm_runtime_suspend(struct device *dev)
 					ctrl->intr_mask);
 		ctrl->reg_write(ctrl, ctrl->reg_layout[SWRM_REG_INTERRUPT_CPU_EN],
 				ctrl->intr_mask);
-		/* Prepare slaves for clock stop */
+		/*
+		 * Prepare slaves for clock stop. If that fails, suspend
+		 * without the clock stop: an error here leaves the device in
+		 * runtime PM error state, and every later stream fails. The
+		 * next resume then resets the controller and enumerates again.
+		 */
 		ret = sdw_bus_prep_clk_stop(&ctrl->bus);
 		if (ret < 0 && ret != -ENODATA) {
-			dev_err(dev, "prepare clock stop failed %d", ret);
-			return ret;
-		}
-
-		ret = sdw_bus_clk_stop(&ctrl->bus);
-		if (ret < 0 && ret != -ENODATA) {
-			dev_err(dev, "bus clock stop failed %d", ret);
-			return ret;
+			dev_warn(dev, "prepare clock stop failed %d, resetting at resume\n",
+				 ret);
+			ctrl->clock_stop_not_supported = true;
+		} else {
+			ret = sdw_bus_clk_stop(&ctrl->bus);
+			if (ret < 0 && ret != -ENODATA) {
+				dev_warn(dev, "bus clock stop failed %d, resetting at resume\n",
+					 ret);
+				ctrl->clock_stop_not_supported = true;
+			}
 		}
 	}
 
