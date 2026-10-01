@@ -64,6 +64,7 @@ struct q6asm_dai_rtd {
 	uint64_t copied_total;
 	uint16_t bits_per_sample;
 	snd_pcm_uframes_t queue_ptr;
+	unsigned int queued_periods;
 	uint16_t source; /* Encoding source bit mask */
 	struct audio_client *audio_client;
 	uint32_t next_track_stream_id;
@@ -176,11 +177,57 @@ static const struct snd_compr_codec_caps q6asm_compr_caps = {
 	.descriptor[0].formats = 0,
 };
 
+/*
+ * A stream with stop_threshold == boundary (for example the dmix slave) can
+ * run without any appl_ptr updates. The whole buffer is then always valid.
+ */
+static bool q6asm_dai_free_running(struct snd_pcm_runtime *runtime)
+{
+	return runtime->stop_threshold >= runtime->boundary;
+}
+
+/*
+ * Send playback periods to the DSP. The caller holds the PCM stream lock.
+ * The DSP never holds more than runtime->periods buffers. In the normal case
+ * only periods up to appl_ptr are sent. A free running stream keeps all
+ * periods queued, else hw_ptr does not move.
+ */
+static int q6asm_dai_queue_playback(struct q6asm_dai_rtd *prtd, bool free_run)
+{
+	struct snd_pcm_runtime *runtime = prtd->substream->runtime;
+	snd_pcm_sframes_t avail;
+	int ret;
+
+	while (prtd->queued_periods < runtime->periods) {
+		if (!free_run) {
+			avail = runtime->control->appl_ptr - prtd->queue_ptr;
+			if (avail < 0)
+				avail += runtime->boundary;
+			if (avail < runtime->period_size ||
+			    avail > runtime->buffer_size)
+				break;
+		}
+
+		ret = q6asm_write_async(prtd->audio_client, prtd->stream_id,
+					prtd->pcm_count, 0, 0, 0);
+		if (ret < 0)
+			return ret;
+
+		prtd->queued_periods++;
+		prtd->queue_ptr += runtime->period_size;
+		if (prtd->queue_ptr >= runtime->boundary)
+			prtd->queue_ptr -= runtime->boundary;
+	}
+
+	return 0;
+}
+
 static void event_handler(uint32_t opcode, uint32_t token,
 			  void *payload, void *priv)
 {
 	struct q6asm_dai_rtd *prtd = priv;
 	struct snd_pcm_substream *substream = prtd->substream;
+	unsigned long flags;
 
 	switch (opcode) {
 	case ASM_CLIENT_EVENT_CMD_RUN_DONE:
@@ -188,7 +235,17 @@ static void event_handler(uint32_t opcode, uint32_t token,
 	case ASM_CLIENT_EVENT_CMD_EOS_DONE:
 		break;
 	case ASM_CLIENT_EVENT_DATA_WRITE_DONE:
-		snd_pcm_period_elapsed(substream);
+		snd_pcm_stream_lock_irqsave(substream, flags);
+		if (prtd->queued_periods)
+			prtd->queued_periods--;
+		if (prtd->state == Q6ASM_STREAM_RUNNING &&
+		    snd_pcm_running(substream) &&
+		    q6asm_dai_queue_playback(prtd,
+				q6asm_dai_free_running(substream->runtime)) < 0)
+			dev_err_ratelimited(substream->pcm->card->dev,
+					    "Error queuing playback buffer\n");
+		snd_pcm_period_elapsed_under_stream_lock(substream);
+		snd_pcm_stream_unlock_irqrestore(substream, flags);
 		break;
 	case ASM_CLIENT_EVENT_DATA_READ_DONE:
 		snd_pcm_period_elapsed(substream);
@@ -242,6 +299,10 @@ static int q6asm_dai_prepare(struct snd_soc_component *component,
 					 substream->stream);
 		prtd->state = Q6ASM_STREAM_STOPPED;
 	}
+
+	/* A closed stream returns no more WRITE_DONE events */
+	prtd->queue_ptr = 0;
+	prtd->queued_periods = 0;
 
 	ret = q6asm_map_memory_regions(substream->stream, prtd->audio_client,
 				       prtd->phys,
@@ -313,20 +374,12 @@ static int q6asm_dai_ack(struct snd_soc_component *component, struct snd_pcm_sub
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct q6asm_dai_rtd *prtd = runtime->private_data;
-	int i, ret = 0, avail_periods;
+	int ret = 0;
 
 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK && prtd->state == Q6ASM_STREAM_RUNNING) {
-		avail_periods = (runtime->control->appl_ptr - prtd->queue_ptr)/runtime->period_size;
-		for (i = 0; i < avail_periods; i++) {
-			ret = q6asm_write_async(prtd->audio_client, prtd->stream_id,
-					   prtd->pcm_count, 0, 0, 0);
-
-			if (ret < 0) {
-				dev_err(component->dev, "Error queuing playback buffer %d\n", ret);
-				return ret;
-			}
-			prtd->queue_ptr += runtime->period_size;
-		}
+		ret = q6asm_dai_queue_playback(prtd, false);
+		if (ret < 0)
+			dev_err(component->dev, "Error queuing playback buffer %d\n", ret);
 	}
 
 	return ret;
@@ -343,6 +396,13 @@ static int q6asm_dai_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		/* Nothing calls .ack for a free running stream */
+		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
+		    q6asm_dai_free_running(runtime)) {
+			ret = q6asm_dai_queue_playback(prtd, true);
+			if (ret < 0)
+				break;
+		}
 		ret = q6asm_run_nowait(prtd->audio_client, prtd->stream_id,
 				       0, 0, 0);
 		break;
