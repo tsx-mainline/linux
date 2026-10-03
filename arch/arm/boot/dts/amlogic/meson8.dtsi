@@ -611,6 +611,21 @@
 		status = "disabled";
 	};
 
+	/*
+	 * I2C master D. The vendor kernel names its interrupt
+	 * INT_I2C_MASTER3 (SPI 39). The vendor driver polls, so this
+	 * interrupt is not confirmed by the vendor.
+	 */
+	i2c_D: i2c@8d20 {
+		compatible = "amlogic,meson6-i2c";
+		reg = <0x8d20 0x20>;
+		interrupts = <GIC_SPI 39 IRQ_TYPE_EDGE_RISING>;
+		clocks = <&clkc CLKID_CLK81>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "disabled";
+	};
+
 	pinctrl_cbus: pinctrl@8030 {
 		compatible = "amlogic,meson8-cbus-pinctrl";
 		#address-cells = <1>;
@@ -648,6 +663,13 @@
 			mux {
 				groups = "i2c_sda_b", "i2c_sck_b";
 				function = "i2c_b";
+			};
+		};
+
+		i2c_d1_pins: i2c-d1 {
+			mux {
+				groups = "i2c_sda_d1", "i2c_sck_d1";
+				function = "i2c_d";
 			};
 		};
 
