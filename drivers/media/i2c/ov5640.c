@@ -14,6 +14,7 @@
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
 #include <linux/slab.h>
@@ -432,6 +433,13 @@ struct ov5640_ctrls {
 	struct v4l2_ctrl *vflip;
 };
 
+/* ISP values of one camera module, written after the init table */
+struct ov5640_module_tuning {
+	const char *machine;
+	const struct reg_value *regs;
+	unsigned int num_regs;
+};
+
 struct ov5640_dev {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
@@ -461,6 +469,8 @@ struct ov5640_dev {
 
 	u32 prev_sysclk, prev_hts;
 	u32 ae_low, ae_high, ae_target;
+
+	const struct ov5640_module_tuning *tuning;
 
 	bool pending_mode_change;
 	bool streaming;
@@ -618,6 +628,64 @@ static const struct reg_value ov5640_init_setting[] = {
 	{0x5025, 0x00, 0, 0}, {0x3a0f, 0x30, 0, 0}, {0x3a10, 0x28, 0, 0},
 	{0x3a1b, 0x30, 0, 0}, {0x3a1e, 0x26, 0, 0}, {0x3a11, 0x60, 0, 0},
 	{0x3a1f, 0x14, 0, 0}, {0x3008, 0x02, 0, 0}, {0x3c00, 0x04, 0, 300},
+};
+
+/*
+ * The ISP values of ov5640_init_setting fit the OmniVision reference module.
+ * With them, the advanced AWB of the Crestron TSW-1060 and TSS-10 camera
+ * module stops at a point with too little green, and the picture has a
+ * magenta cast. These are the AWB, color matrix and lens correction values
+ * of the vendor kernel for this module. The vendor table names the sensor an
+ * OV5645. The fitted sensor is an OV5640 with the same ISP registers.
+ */
+static const struct reg_value ov5640_tuning_crestron_tsw1060[] = {
+	/* advanced AWB */
+	{0x5180, 0xff, 0, 0}, {0x5181, 0xf2, 0, 0}, {0x5182, 0x00, 0, 0},
+	{0x5183, 0x14, 0, 0}, {0x5184, 0x25, 0, 0}, {0x5185, 0x24, 0, 0},
+	{0x5186, 0x15, 0, 0}, {0x5187, 0x20, 0, 0}, {0x5188, 0x22, 0, 0},
+	{0x5189, 0x75, 0, 0}, {0x518a, 0x5e, 0, 0}, {0x518b, 0xf9, 0, 0},
+	{0x518c, 0xb2, 0, 0}, {0x518d, 0x3f, 0, 0}, {0x518e, 0x31, 0, 0},
+	{0x518f, 0x61, 0, 0}, {0x5190, 0x4a, 0, 0}, {0x5191, 0xf8, 0, 0},
+	{0x5192, 0x04, 0, 0}, {0x5193, 0x70, 0, 0}, {0x5194, 0xf0, 0, 0},
+	{0x5195, 0xf0, 0, 0}, {0x5196, 0x03, 0, 0}, {0x5197, 0x01, 0, 0},
+	{0x5198, 0x06, 0, 0}, {0x5199, 0xc2, 0, 0}, {0x519a, 0x04, 0, 0},
+	{0x519b, 0x00, 0, 0}, {0x519c, 0x05, 0, 0}, {0x519d, 0x8c, 0, 0},
+	{0x519e, 0x38, 0, 0},
+	/* color matrix */
+	{0x5381, 0x1a, 0, 0}, {0x5382, 0x68, 0, 0}, {0x5383, 0x01, 0, 0},
+	{0x5384, 0x1f, 0, 0}, {0x5385, 0x5a, 0, 0}, {0x5386, 0x79, 0, 0},
+	{0x5387, 0x8d, 0, 0}, {0x5388, 0x74, 0, 0}, {0x5389, 0x18, 0, 0},
+	{0x538a, 0x01, 0, 0}, {0x538b, 0x9c, 0, 0},
+	/* lens correction */
+	{0x5800, 0x28, 0, 0}, {0x5801, 0x20, 0, 0}, {0x5802, 0x18, 0, 0},
+	{0x5803, 0x18, 0, 0}, {0x5804, 0x20, 0, 0}, {0x5805, 0x28, 0, 0},
+	{0x5806, 0x17, 0, 0}, {0x5807, 0x0c, 0, 0}, {0x5808, 0x08, 0, 0},
+	{0x5809, 0x08, 0, 0}, {0x580a, 0x0c, 0, 0}, {0x580b, 0x17, 0, 0},
+	{0x580c, 0x0c, 0, 0}, {0x580d, 0x05, 0, 0}, {0x580e, 0x01, 0, 0},
+	{0x580f, 0x01, 0, 0}, {0x5810, 0x05, 0, 0}, {0x5811, 0x0c, 0, 0},
+	{0x5812, 0x0c, 0, 0}, {0x5813, 0x05, 0, 0}, {0x5814, 0x01, 0, 0},
+	{0x5815, 0x01, 0, 0}, {0x5816, 0x05, 0, 0}, {0x5817, 0x0c, 0, 0},
+	{0x5818, 0x16, 0, 0}, {0x5819, 0x0b, 0, 0}, {0x581a, 0x07, 0, 0},
+	{0x581b, 0x08, 0, 0}, {0x581c, 0x0c, 0, 0}, {0x581d, 0x17, 0, 0},
+	{0x581e, 0x27, 0, 0}, {0x581f, 0x1f, 0, 0}, {0x5820, 0x18, 0, 0},
+	{0x5821, 0x18, 0, 0}, {0x5822, 0x20, 0, 0}, {0x5823, 0x28, 0, 0},
+	{0x5824, 0x16, 0, 0}, {0x5825, 0x1a, 0, 0}, {0x5826, 0x1c, 0, 0},
+	{0x5827, 0x1a, 0, 0}, {0x5828, 0x26, 0, 0}, {0x5829, 0x1a, 0, 0},
+	{0x582a, 0x26, 0, 0}, {0x582b, 0x34, 0, 0}, {0x582c, 0x26, 0, 0},
+	{0x582d, 0x1a, 0, 0}, {0x582e, 0x18, 0, 0}, {0x582f, 0x42, 0, 0},
+	{0x5830, 0x40, 0, 0}, {0x5831, 0x42, 0, 0}, {0x5832, 0x18, 0, 0},
+	{0x5833, 0x2a, 0, 0}, {0x5834, 0x26, 0, 0}, {0x5835, 0x26, 0, 0},
+	{0x5836, 0x26, 0, 0}, {0x5837, 0x28, 0, 0}, {0x5838, 0x16, 0, 0},
+	{0x5839, 0x1a, 0, 0}, {0x583a, 0x1a, 0, 0}, {0x583b, 0x1a, 0, 0},
+	{0x583c, 0x26, 0, 0}, {0x583d, 0xce, 0, 0},
+};
+
+static const struct ov5640_module_tuning ov5640_module_tunings[] = {
+	{
+		.machine = "crestron,tsw1060",
+		.regs = ov5640_tuning_crestron_tsw1060,
+		.num_regs = ARRAY_SIZE(ov5640_tuning_crestron_tsw1060),
+	},
 };
 
 static const struct reg_value ov5640_setting_low_res[] = {
@@ -2415,6 +2483,9 @@ static int ov5640_restore_mode(struct ov5640_dev *sensor)
 	/* first load the initial register values */
 	ov5640_load_regs(sensor, ov5640_init_setting,
 			 ARRAY_SIZE(ov5640_init_setting));
+	if (sensor->tuning)
+		ov5640_load_regs(sensor, sensor->tuning->regs,
+				 sensor->tuning->num_regs);
 
 	ret = ov5640_mod_reg(sensor, OV5640_REG_SYS_ROOT_DIVIDER, 0x3f,
 			     (ilog2(OV5640_SCLK2X_ROOT_DIV) << 2) |
@@ -3868,6 +3939,15 @@ static int ov5640_probe(struct i2c_client *client)
 		ov5640_csi2_link_freqs[OV5640_DEFAULT_LINK_FREQ];
 
 	sensor->ae_target = 52;
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(ov5640_module_tunings); i++) {
+		if (of_machine_is_compatible(ov5640_module_tunings[i].machine)) {
+			sensor->tuning = &ov5640_module_tunings[i];
+			dev_info(dev, "ISP tuning for %s\n",
+				 sensor->tuning->machine);
+			break;
+		}
+	}
 
 	endpoint = fwnode_graph_get_next_endpoint(dev_fwnode(&client->dev),
 						  NULL);
