@@ -64,6 +64,7 @@
 #define HHI_VDEC2_CLK_CNTL		0x1e4
 #define HHI_VDEC3_CLK_CNTL		0x1e8
 #define HHI_NAND_CLK_CNTL		0x25c
+#define HHI_GEN_CLK_CNTL		0x228
 #define HHI_MPLL_CNTL			0x280
 #define HHI_SYS_PLL_CNTL		0x300
 #define HHI_VID_PLL_CNTL		0x320
@@ -3250,6 +3251,67 @@ static struct clk_regmap meson8_eth_clk_gate = {
 	},
 };
 
+/*
+ * GEN_CLK is the general clock output. On Meson8m2 the pin mux sends it to
+ * GPIOH_9, for example as the master clock of a camera sensor. The vendor
+ * kernel programs HHI_GEN_CLK_CNTL as: bits 15:12 source select (0 = XTAL),
+ * bits 6:0 divider (N + 1), bit 11 enable. Only the XTAL parent is known.
+ */
+static u32 meson8_gen_clk_mux_table[] = { 0 };
+
+static struct clk_regmap meson8_gen_clk_sel = {
+	.data = &(struct clk_regmap_mux_data) {
+		.offset = HHI_GEN_CLK_CNTL,
+		.mask = 0xf,
+		.shift = 12,
+		.table = meson8_gen_clk_mux_table,
+	},
+	.hw.init = &(struct clk_init_data) {
+		.name = "gen_clk_sel",
+		.ops = &clk_regmap_mux_ops,
+		.parent_data = &(const struct clk_parent_data) {
+			/* TODO: all other parents are unknown */
+			.fw_name = "xtal",
+			.name = "xtal",
+			.index = -1,
+		},
+		.num_parents = 1,
+	},
+};
+
+static struct clk_regmap meson8_gen_clk_div = {
+	.data = &(struct clk_regmap_div_data) {
+		.offset = HHI_GEN_CLK_CNTL,
+		.shift = 0,
+		.width = 7,
+	},
+	.hw.init = &(struct clk_init_data) {
+		.name = "gen_clk_div",
+		.ops = &clk_regmap_divider_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8_gen_clk_sel.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+static struct clk_regmap meson8_gen_clk = {
+	.data = &(struct clk_regmap_gate_data) {
+		.offset = HHI_GEN_CLK_CNTL,
+		.bit_idx = 11,
+	},
+	.hw.init = &(struct clk_init_data) {
+		.name = "gen_clk",
+		.ops = &clk_regmap_gate_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8_gen_clk_div.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
 static const struct clk_parent_data meson8b_pclk_parents = { .hw = &meson8b_clk81.hw };
 
 #define MESON_GATE(_name, _reg, _bit) \
@@ -3451,6 +3513,9 @@ static struct clk_hw *meson8_hw_clks[] = {
 	[CLKID_RNG1]		    = &meson8b_rng1.hw,
 	[CLKID_GCLK_VENCL_INT]	    = &meson8b_gclk_vencl_int.hw,
 	[CLKID_VCLK2_ENCL]	    = &meson8b_vclk2_encl.hw,
+	[CLKID_GEN_CLK_SEL]	    = &meson8_gen_clk_sel.hw,
+	[CLKID_GEN_CLK_DIV]	    = &meson8_gen_clk_div.hw,
+	[CLKID_GEN_CLK]		    = &meson8_gen_clk.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
@@ -3878,6 +3943,9 @@ static struct clk_hw *meson8m2_hw_clks[] = {
 	[CLKID_RNG1]		    = &meson8b_rng1.hw,
 	[CLKID_GCLK_VENCL_INT]	    = &meson8b_gclk_vencl_int.hw,
 	[CLKID_VCLK2_ENCL]	    = &meson8b_vclk2_encl.hw,
+	[CLKID_GEN_CLK_SEL]	    = &meson8_gen_clk_sel.hw,
+	[CLKID_GEN_CLK_DIV]	    = &meson8_gen_clk_div.hw,
+	[CLKID_GEN_CLK]		    = &meson8_gen_clk.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
