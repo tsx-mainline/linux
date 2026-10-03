@@ -235,6 +235,17 @@
 	};
 };
 
+&mipi_csi2 {
+	status = "okay";
+
+	port {
+		mipi_csi2_in: endpoint {
+			remote-endpoint = <&ov5640_out>;
+			data-lanes = <1 2>;
+		};
+	};
+};
+
 &i2c_D {
 	status = "okay";
 	pinctrl-0 = <&i2c_d1_pins>;
@@ -258,6 +269,7 @@
 
 		port {
 			ov5640_out: endpoint {
+				remote-endpoint = <&mipi_csi2_in>;
 				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
 				clock-lanes = <0>;
 				data-lanes = <1 2>;
