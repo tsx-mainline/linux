@@ -429,6 +429,26 @@
 				};
 			};
 		};
+
+		/*
+		 * The adapter registers are inside the VPU range. The driver
+		 * maps them without a region request.
+		 */
+		mipi_csi2: csi@140000 {
+			compatible = "amlogic,meson8-mipi-csi2";
+			reg = <0x140000 0x100>,
+			      <0x142000 0x80>,
+			      <0x10a800 0x58>;
+			reg-names = "host", "phy", "adapter";
+			interrupts = <GIC_SPI 95 IRQ_TYPE_EDGE_RISING>;
+			clocks = <&clkc CLKID_CSI_DIG_CLKIN>,
+				 <&clkc CLKID_MIPI_PHY>;
+			clock-names = "csi", "phy";
+			assigned-clocks = <&clkc CLKID_MIPI_PHY>;
+			assigned-clock-rates = <212500000>;
+			amlogic,hhi-sysctrl = <&hhi>;
+			status = "disabled";
+		};
 	};
 }; /* end of / */
 
