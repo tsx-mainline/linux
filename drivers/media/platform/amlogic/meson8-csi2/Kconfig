@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config VIDEO_MESON8_CSI2
+	tristate "Amlogic Meson8 MIPI CSI-2 receiver and capture"
+	depends on ARCH_MESON || COMPILE_TEST
+	depends on VIDEO_DEV
+	depends on OF
+	depends on HAS_DMA
+	select MEDIA_CONTROLLER
+	select MFD_SYSCON
+	select V4L2_FWNODE
+	select VIDEO_V4L2_SUBDEV_API
+	select VIDEOBUF2_DMA_CONTIG
+	help
+	  Video4Linux2 driver for the MIPI CSI-2 receiver of the Amlogic
+	  Meson8 and Meson8m2 SoCs. It receives YUV 4:2:2 data from a camera
+	  sensor and writes the frames directly to memory.
+
+	  To compile this driver as a module, choose M here. The module is
+	  called meson8-csi2.
