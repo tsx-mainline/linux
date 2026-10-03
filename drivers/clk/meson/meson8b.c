@@ -57,6 +57,7 @@
 #define HHI_VID_DIVIDER_CNTL		0x198
 #define HHI_SYS_CPU_CLK_CNTL0		0x19c
 #define HHI_MALI_CLK_CNTL		0x1b0
+#define HHI_MIPI_PHY_CLK_CNTL		0x1b8
 #define HHI_VPU_CLK_CNTL		0x1bc
 #define HHI_HDMI_CLK_CNTL		0x1cc
 #define HHI_ETH_CLK_CNTL		0x1d8
@@ -3312,6 +3313,67 @@ static struct clk_regmap meson8_gen_clk = {
 	},
 };
 
+/*
+ * The MIPI PHY clock drives the MIPI CSI-2 D-PHY and the CSI-2 host. The
+ * register interface of both blocks needs it: without it a register access
+ * gives an external abort. HHI_MIPI_PHY_CLK_CNTL has the source select in
+ * bits 10:9, the gate in bit 8 and the divider (N + 1) in bits 6:0. A
+ * measurement on Meson8m2 (clock measure ID 63, "mipi_csi_cfg") gives a
+ * clock only for source 1, which is fclk_div3. The other sources gave no
+ * clock, so the mux has one parent.
+ */
+static u32 meson8_mipi_phy_mux_table[] = { 1 };
+
+static struct clk_regmap meson8_mipi_phy_sel = {
+	.data = &(struct clk_regmap_mux_data) {
+		.offset = HHI_MIPI_PHY_CLK_CNTL,
+		.mask = 0x3,
+		.shift = 9,
+		.table = meson8_mipi_phy_mux_table,
+	},
+	.hw.init = &(struct clk_init_data) {
+		.name = "mipi_phy_sel",
+		.ops = &clk_regmap_mux_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8b_fclk_div3.hw
+		},
+		.num_parents = 1,
+	},
+};
+
+static struct clk_regmap meson8_mipi_phy_div = {
+	.data = &(struct clk_regmap_div_data) {
+		.offset = HHI_MIPI_PHY_CLK_CNTL,
+		.shift = 0,
+		.width = 7,
+	},
+	.hw.init = &(struct clk_init_data) {
+		.name = "mipi_phy_div",
+		.ops = &clk_regmap_divider_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8_mipi_phy_sel.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
+static struct clk_regmap meson8_mipi_phy = {
+	.data = &(struct clk_regmap_gate_data) {
+		.offset = HHI_MIPI_PHY_CLK_CNTL,
+		.bit_idx = 8,
+	},
+	.hw.init = &(struct clk_init_data) {
+		.name = "mipi_phy",
+		.ops = &clk_regmap_gate_ops,
+		.parent_hws = (const struct clk_hw *[]) {
+			&meson8_mipi_phy_div.hw
+		},
+		.num_parents = 1,
+		.flags = CLK_SET_RATE_PARENT,
+	},
+};
+
 static const struct clk_parent_data meson8b_pclk_parents = { .hw = &meson8b_clk81.hw };
 
 #define MESON_GATE(_name, _reg, _bit) \
@@ -3357,6 +3419,7 @@ static MESON8B_PCLK(meson8b_demux,		HHI_GCLK_MPEG1,  4, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_blkmv,		HHI_GCLK_MPEG1, 14, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_aiu,		HHI_GCLK_MPEG1, 15, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_uart1,		HHI_GCLK_MPEG1, 16, CLK_IGNORE_UNUSED);
+static MESON8B_PCLK(meson8_csi_dig_clkin,	HHI_GCLK_MPEG1, 18, 0);
 static MESON8B_PCLK(meson8b_g2d,		HHI_GCLK_MPEG1, 20, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_usb0,		HHI_GCLK_MPEG1, 21, CLK_IGNORE_UNUSED);
 static MESON8B_PCLK(meson8b_usb1,		HHI_GCLK_MPEG1, 22, CLK_IGNORE_UNUSED);
@@ -3516,6 +3579,10 @@ static struct clk_hw *meson8_hw_clks[] = {
 	[CLKID_GEN_CLK_SEL]	    = &meson8_gen_clk_sel.hw,
 	[CLKID_GEN_CLK_DIV]	    = &meson8_gen_clk_div.hw,
 	[CLKID_GEN_CLK]		    = &meson8_gen_clk.hw,
+	[CLKID_MIPI_PHY_SEL]	    = &meson8_mipi_phy_sel.hw,
+	[CLKID_MIPI_PHY_DIV]	    = &meson8_mipi_phy_div.hw,
+	[CLKID_MIPI_PHY]	    = &meson8_mipi_phy.hw,
+	[CLKID_CSI_DIG_CLKIN]	    = &meson8_csi_dig_clkin.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
@@ -3946,6 +4013,10 @@ static struct clk_hw *meson8m2_hw_clks[] = {
 	[CLKID_GEN_CLK_SEL]	    = &meson8_gen_clk_sel.hw,
 	[CLKID_GEN_CLK_DIV]	    = &meson8_gen_clk_div.hw,
 	[CLKID_GEN_CLK]		    = &meson8_gen_clk.hw,
+	[CLKID_MIPI_PHY_SEL]	    = &meson8_mipi_phy_sel.hw,
+	[CLKID_MIPI_PHY_DIV]	    = &meson8_mipi_phy_div.hw,
+	[CLKID_MIPI_PHY]	    = &meson8_mipi_phy.hw,
+	[CLKID_CSI_DIG_CLKIN]	    = &meson8_csi_dig_clkin.hw,
 	[CLKID_VCLK2_VENCLMCC]	    = &meson8b_vclk2_venclmcc.hw,
 	[CLKID_VCLK2_VENCL]	    = &meson8b_vclk2_vencl.hw,
 	[CLKID_VCLK2_OTHER]	    = &meson8b_vclk2_other.hw,
