@@ -1309,6 +1309,7 @@ M:	unex <7575866+unex@users.noreply.github.com>
 L:	linux-media@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/media/amlogic,meson8-mipi-csi2.yaml
+F:	drivers/media/platform/amlogic/meson8-csi2/
 
 AMLOGIC MIPI ADAPTER DRIVER
 M:	Keke Li <keke.li@amlogic.com>
