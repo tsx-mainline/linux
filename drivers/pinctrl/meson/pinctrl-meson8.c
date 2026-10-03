@@ -288,6 +288,8 @@ static const unsigned int spi_sclk_0_pins[]	= { GPIOH_6 };
 static const unsigned int i2c_sda_d1_pins[]	= { GPIOH_7 };
 static const unsigned int i2c_sck_d1_pins[]	= { GPIOH_8 };
 
+static const unsigned int gen_clk_h_pins[]	= { GPIOH_9 };
+
 /* bank Z */
 static const unsigned int spi_ss0_1_pins[]	= { GPIOZ_9 };
 static const unsigned int spi_ss1_1_pins[]	= { GPIOZ_10 };
@@ -658,6 +660,9 @@ static const struct meson_pmx_group meson8_cbus_groups[] = {
 	GROUP(i2c_sda_d1,	4,	3),
 	GROUP(i2c_sck_d1,	4,	2),
 
+	/* Meson8m2 only (vendor gpio_to_pin_m8m2[]) */
+	GROUP(gen_clk_h,	3,	19),
+
 	/* bank Z */
 	GROUP(spi_ss0_1,	8,	16),
 	GROUP(spi_ss1_1,	8,	12),
@@ -873,6 +878,10 @@ static const char * const xtal_groups[] = {
 	"xtal_32k_out", "xtal_24m_out"
 };
 
+static const char * const gen_clk_groups[] = {
+	"gen_clk_h"
+};
+
 static const char * const uart_c_groups[] = {
 	"uart_tx_c", "uart_rx_c", "uart_cts_c", "uart_rts_c"
 };
@@ -1028,6 +1037,7 @@ static const struct meson_pmx_func meson8_cbus_functions[] = {
 	FUNCTION(iso7816),
 	FUNCTION(i2c_d),
 	FUNCTION(xtal),
+	FUNCTION(gen_clk),
 	FUNCTION(uart_c),
 	FUNCTION(pcm_b),
 	FUNCTION(i2c_c),
