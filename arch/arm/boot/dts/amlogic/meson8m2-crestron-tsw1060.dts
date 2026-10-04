@@ -7,7 +7,6 @@
 /dts-v1/;
 
 #include "meson8m2-crestron-tsw-xx60.dtsi"
-#include <dt-bindings/media/video-interfaces.h>
 
 / {
 	model = "Crestron TSW-1060";
@@ -185,95 +184,3 @@
 
 /* Audio: AIU I2S -> ZLS38051 -> 2x TFA9890 (after the panel: node order) */
 #include "meson8m2-crestron-tsw1060-audio.dtsi"
-
-/*
- * Camera: an OmniVision OV5640 on I2C_D at 0x3c, 2-lane MIPI CSI-2. The
- * vendor board file names an OV5645, but the sensor on the TSS-10 reads
- * chip ID 0x5640 (revision 0xb0). Mainline has no Meson8 CSI-2 receiver,
- * so the endpoint has no remote. This node only lets the sensor driver
- * power the sensor and read its chip ID.
- *
- * GPIOH_6 is the power-down line (high powers the sensor down, as in the
- * vendor OV5640 entry). GPIOH_4 is the reset line (active low). The master
- * clock is 24 MHz from GEN_CLK (XTAL, divider 1) on GPIOH_9. The vendor
- * never switches a camera supply, so the three supplies are fixed and
- * always on. Their voltages are the OV5640 nominal values.
- */
-/ {
-	cam_dovdd: regulator-cam-dovdd {
-		compatible = "regulator-fixed";
-		regulator-name = "CAM_DOVDD";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-		regulator-always-on;
-	};
-
-	cam_avdd: regulator-cam-avdd {
-		compatible = "regulator-fixed";
-		regulator-name = "CAM_AVDD";
-		regulator-min-microvolt = <2800000>;
-		regulator-max-microvolt = <2800000>;
-		regulator-always-on;
-	};
-
-	cam_dvdd: regulator-cam-dvdd {
-		compatible = "regulator-fixed";
-		regulator-name = "CAM_DVDD";
-		regulator-min-microvolt = <1500000>;
-		regulator-max-microvolt = <1500000>;
-		regulator-always-on;
-	};
-};
-
-&pinctrl_cbus {
-	gen_clk_h_pins: gen-clk-h {
-		mux {
-			groups = "gen_clk_h";
-			function = "gen_clk";
-			bias-disable;
-		};
-	};
-};
-
-&mipi_csi2 {
-	status = "okay";
-
-	port {
-		mipi_csi2_in: endpoint {
-			remote-endpoint = <&ov5640_out>;
-			data-lanes = <1 2>;
-		};
-	};
-};
-
-&i2c_D {
-	status = "okay";
-	pinctrl-0 = <&i2c_d1_pins>;
-	pinctrl-names = "default";
-	clock-frequency = <100000>;
-
-	camera@3c {
-		compatible = "ovti,ov5640";
-		reg = <0x3c>;
-		pinctrl-0 = <&gen_clk_h_pins>;
-		pinctrl-names = "default";
-		clocks = <&clkc CLKID_GEN_CLK>;
-		clock-names = "xclk";
-		assigned-clocks = <&clkc CLKID_GEN_CLK>;
-		assigned-clock-rates = <24000000>;
-		powerdown-gpios = <&gpio GPIOH_6 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio GPIOH_4 GPIO_ACTIVE_LOW>;
-		DOVDD-supply = <&cam_dovdd>;
-		AVDD-supply = <&cam_avdd>;
-		DVDD-supply = <&cam_dvdd>;
-
-		port {
-			ov5640_out: endpoint {
-				remote-endpoint = <&mipi_csi2_in>;
-				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
-				clock-lanes = <0>;
-				data-lanes = <1 2>;
-			};
-		};
-	};
-};
