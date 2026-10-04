@@ -23,6 +23,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/media/video-interfaces.h>
 
 / {
 	aliases {
@@ -225,6 +226,35 @@
 		enable-active-high;
 		vin-supply = <&panel_vdd2>;
 		startup-delay-us = <20000>;
+	};
+
+	/*
+	 * Camera supplies (see camera@3c below). The vendor never switches a
+	 * camera supply, so the three supplies are fixed and always on. Their
+	 * voltages are the OV5640 nominal values.
+	 */
+	cam_dovdd: regulator-cam-dovdd {
+		compatible = "regulator-fixed";
+		regulator-name = "CAM_DOVDD";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	cam_avdd: regulator-cam-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "CAM_AVDD";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		regulator-always-on;
+	};
+
+	cam_dvdd: regulator-cam-dvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "CAM_DVDD";
+		regulator-min-microvolt = <1500000>;
+		regulator-max-microvolt = <1500000>;
+		regulator-always-on;
 	};
 
 	thermal-zones {
@@ -602,6 +632,65 @@
 	};
 };
 
+/*
+ * I2C_D (i2c-3): the camera, an OmniVision OV5640 at 0x3c, 2-lane MIPI
+ * CSI-2 to the CSI-2 receiver. The vendor DTBs of the 7-inch and the
+ * 10-inch panel have the same camera node (yushan_one_7inch and
+ * yushan_one_10inch: i2c_bus_d, power-down GPIOH_6, reset GPIOH_4, clock
+ * pin GPIOH_9). They name an OV5645, but the sensor on the TSS-10 reads
+ * chip ID 0x5640 (revision 0xb0).
+ *
+ * GPIOH_6 is the power-down line (high powers the sensor down, as in the
+ * vendor OV5640 entry). GPIOH_4 is the reset line (active low). The master
+ * clock is 24 MHz from GEN_CLK (XTAL, divider 1) on GPIOH_9.
+ *
+ * A panel with U-Boot government=1, such as the TSW-760-NC, has no camera.
+ * There the sensor driver fails its probe at the first register access,
+ * and the receiver gets no source.
+ */
+&i2c_D {
+	status = "okay";
+	pinctrl-0 = <&i2c_d1_pins>;
+	pinctrl-names = "default";
+	clock-frequency = <100000>;
+
+	camera@3c {
+		compatible = "ovti,ov5640";
+		reg = <0x3c>;
+		pinctrl-0 = <&gen_clk_h_pins>;
+		pinctrl-names = "default";
+		clocks = <&clkc CLKID_GEN_CLK>;
+		clock-names = "xclk";
+		assigned-clocks = <&clkc CLKID_GEN_CLK>;
+		assigned-clock-rates = <24000000>;
+		powerdown-gpios = <&gpio GPIOH_6 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio GPIOH_4 GPIO_ACTIVE_LOW>;
+		DOVDD-supply = <&cam_dovdd>;
+		AVDD-supply = <&cam_avdd>;
+		DVDD-supply = <&cam_dvdd>;
+
+		port {
+			ov5640_out: endpoint {
+				remote-endpoint = <&mipi_csi2_in>;
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				clock-lanes = <0>;
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};
+
+&mipi_csi2 {
+	status = "okay";
+
+	port {
+		mipi_csi2_in: endpoint {
+			remote-endpoint = <&ov5640_out>;
+			data-lanes = <1 2>;
+		};
+	};
+};
+
 &pinctrl_cbus {
 	/*
 	 * RMII subset of eth_pins, as the vendor muxes it (PERIPHS_PIN_MUX_6 =
@@ -632,6 +721,15 @@
 		mux {
 			groups = "i2c_sda_a0", "i2c_sck_a0";
 			function = "i2c_a";
+		};
+	};
+
+	/* camera master clock on GPIOH_9 (see camera@3c) */
+	gen_clk_h_pins: gen-clk-h {
+		mux {
+			groups = "gen_clk_h";
+			function = "gen_clk";
+			bias-disable;
 		};
 	};
 };
