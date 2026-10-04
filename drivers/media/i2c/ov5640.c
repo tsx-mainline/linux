@@ -686,6 +686,12 @@ static const struct ov5640_module_tuning ov5640_module_tunings[] = {
 		.regs = ov5640_tuning_crestron_tsw1060,
 		.num_regs = ARRAY_SIZE(ov5640_tuning_crestron_tsw1060),
 	},
+	{
+		/* the vendor kernel writes the same table on the 7-inch board */
+		.machine = "crestron,tsw760",
+		.regs = ov5640_tuning_crestron_tsw1060,
+		.num_regs = ARRAY_SIZE(ov5640_tuning_crestron_tsw1060),
+	},
 };
 
 static const struct reg_value ov5640_setting_low_res[] = {
