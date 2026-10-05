@@ -9,6 +9,7 @@
 #include <linux/mfd/rn5t618.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/reboot.h>
 #include <linux/watchdog.h>
 
 #define DRIVER_NAME "rn5t618-wdt"
@@ -23,9 +24,18 @@ module_param(nowayout, bool, 0);
 MODULE_PARM_DESC(nowayout, "Watchdog cannot be stopped once started (default="
 		 __MODULE_STRING(WATCHDOG_NOWAYOUT) ")");
 
+static bool early;
+module_param(early, bool, 0);
+MODULE_PARM_DESC(early, "Start the watchdog at probe and never stop it. The watchdog "
+		 "core pings it while no user space daemon holds it (default=0)");
+
+/* Timeout in seconds while the kernel pings the watchdog after an early start */
+#define RN5T618_WDT_EARLY_TIMEOUT	32
+
 struct rn5t618_wdt {
 	struct watchdog_device wdt_dev;
 	struct rn5t618 *rn5t618;
+	struct notifier_block reboot_nb;
 };
 
 /*
@@ -100,6 +110,17 @@ static int rn5t618_wdt_stop(struct watchdog_device *wdt_dev)
 {
 	struct rn5t618_wdt *wdt = watchdog_get_drvdata(wdt_dev);
 
+	/*
+	 * With early=1 the PMU watchdog stays on after a magic close. The
+	 * watchdog core pings it from the kernel, so a hang during the
+	 * shutdown or in the restart path still resets the board. The PMU
+	 * clears the watchdog on its power-off and repower sequence.
+	 */
+	if (early) {
+		set_bit(WDOG_HW_RUNNING, &wdt_dev->status);
+		return 0;
+	}
+
 	return regmap_update_bits(wdt->rn5t618->regmap, RN5T618_WATCHDOG,
 				  RN5T618_WATCHDOG_WDOGEN, 0);
 }
@@ -122,6 +143,24 @@ static int rn5t618_wdt_ping(struct watchdog_device *wdt_dev)
 	/* Clear pending watchdog interrupt */
 	return regmap_update_bits(wdt->rn5t618->regmap, RN5T618_PWRIRQ,
 				  RN5T618_PWRIRQ_IR_WDOG, 0);
+}
+
+/*
+ * With early=1 a halt or a power-off without a PMU power-off would end in
+ * a watchdog reset. Switch the watchdog off for these two. A restart keeps
+ * it on until the PMU repower sequence clears it.
+ */
+static int rn5t618_wdt_reboot(struct notifier_block *nb, unsigned long code,
+			      void *data)
+{
+	struct rn5t618_wdt *wdt = container_of(nb, struct rn5t618_wdt,
+					       reboot_nb);
+
+	if (code == SYS_HALT || code == SYS_POWER_OFF)
+		regmap_update_bits(wdt->rn5t618->regmap, RN5T618_WATCHDOG,
+				   RN5T618_WATCHDOG_WDOGEN, 0);
+
+	return NOTIFY_DONE;
 }
 
 static const struct watchdog_info rn5t618_wdt_info = {
@@ -177,6 +216,28 @@ static int rn5t618_wdt_probe(struct platform_device *pdev)
 	watchdog_set_nowayout(&wdt->wdt_dev, nowayout);
 
 	platform_set_drvdata(pdev, wdt);
+
+	/*
+	 * With early=1 the watchdog covers the boot before the user space
+	 * daemon opens it. WDOG_HW_RUNNING makes the watchdog core ping it
+	 * until then (CONFIG_WATCHDOG_HANDLE_BOOT_ENABLED or
+	 * watchdog.handle_boot_enabled=1), and watchdog.open_timeout can limit
+	 * that time.
+	 */
+	if (early) {
+		if (!timeout)
+			wdt->wdt_dev.timeout = RN5T618_WDT_EARLY_TIMEOUT;
+		ret = rn5t618_wdt_start(&wdt->wdt_dev);
+		if (ret)
+			return ret;
+		set_bit(WDOG_HW_RUNNING, &wdt->wdt_dev.status);
+		wdt->reboot_nb.notifier_call = rn5t618_wdt_reboot;
+		ret = devm_register_reboot_notifier(dev, &wdt->reboot_nb);
+		if (ret)
+			return ret;
+		dev_info(dev, "started at probe, timeout %u s\n",
+			 wdt->wdt_dev.timeout);
+	}
 
 	return devm_watchdog_register_device(dev, &wdt->wdt_dev);
 }
