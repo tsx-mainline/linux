@@ -151,6 +151,34 @@
 	};
 };
 
+&cpu0 {
+	cpu-supply = <&buck1_reg>;
+	/*
+	 * The vendor operating points for this CPU (DECODED): the mx53
+	 * cpu_op table for 1 GHz parts. The vendor kernel selects this
+	 * table because U-Boot starts the CPU at more than 800 MHz and not
+	 * more than 1 GHz (TESTED: 1 GHz). The voltages are the exact vendor
+	 * values, so there is no voltage tolerance.
+	 *
+	 * TESTED with cpufreq-dt: all seven points switch, and vddgp reads
+	 * the vendor voltage at each point. A CPU-bound loop takes 1.25 times
+	 * longer at 800 MHz and 1.66 times longer at 600 MHz than at 1 GHz.
+	 * Five minutes of full load at 1 GHz and 1.25 V gave no kernel
+	 * message and no watchdog reset.
+	 */
+	/delete-property/ voltage-tolerance;
+	operating-points = <
+		/* kHz    uV */
+		1000000 1250000
+		 900000 1250000
+		 800000 1100000
+		 600000 1100000
+		 400000  950000
+		 333000  950000
+		 167000  900000
+	>;
+};
+
 &ipu_di0_disp0 {
 	remote-endpoint = <&display0_in>;
 };
@@ -378,10 +406,94 @@
 		interrupt-parent = <&gpio7>;
 		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
 		/*
-		 * No regulators node: the kernel leaves all rails as U-Boot
-		 * set them. The TSI pins are not a touch screen here.
+		 * The TSI pins are not a touch screen here. There is no
+		 * "dlg,tsi-as-adc": its reference supply is not known. Without
+		 * the flag, the hwmon driver probes and gives the ADC voltages
+		 * (TESTED). The junction temperature (temp8) is not valid: the
+		 * PMIC does not measure it on this board, the result register
+		 * stays 0 (TESTED).
 		 */
-		dlg,tsi-as-adc;
+
+		/*
+		 * The vendor kernel (DA9052 platform data of its imx53_smd
+		 * board file) gives one consumer: BUCKCORE supplies
+		 * "cpu_vddgp" (DECODED). The vendor kernel sets no voltage on
+		 * the other rails and has no consumer for them (DECODED). Their
+		 * use on this board is not known, so they stay as U-Boot set
+		 * them: no voltage limits (the kernel cannot change the
+		 * voltage) and always on (the kernel never switches them off).
+		 * Voltages at boot (TESTED, read on the panel): buck2 1.3 V,
+		 * buck3 1.225 V, buck4 2.5 V, ldo1 1.3 V, ldo2 1.3 V,
+		 * ldo3 3.3 V, ldo4 2.775 V, ldo5 1.3 V, ldo6 1.3 V,
+		 * ldo7 2.75 V, ldo8 1.8 V, ldo9 1.5 V, ldo10 1.3 V.
+		 */
+		regulators {
+			/*
+			 * VDDGP, the CPU core (DECODED). U-Boot starts the CPU
+			 * at 1 GHz with 1.25 V (TESTED), the vendor value for
+			 * 1 GHz. The limits are the lowest and the highest
+			 * voltage of the vendor operating points (DECODED), so
+			 * the kernel never sets a value outside of them.
+			 */
+			buck1_reg: buck1 {
+				regulator-name = "vddgp";
+				regulator-min-microvolt = <900000>;
+				regulator-max-microvolt = <1250000>;
+				regulator-always-on;
+			};
+
+			buck2 {
+				regulator-always-on;
+			};
+
+			buck3 {
+				regulator-always-on;
+			};
+
+			buck4 {
+				regulator-always-on;
+			};
+
+			ldo1 {
+				regulator-always-on;
+			};
+
+			ldo2 {
+				regulator-always-on;
+			};
+
+			ldo3 {
+				regulator-always-on;
+			};
+
+			ldo4 {
+				regulator-always-on;
+			};
+
+			ldo5 {
+				regulator-always-on;
+			};
+
+			ldo6 {
+				regulator-always-on;
+			};
+
+			ldo7 {
+				regulator-always-on;
+			};
+
+			ldo8 {
+				regulator-always-on;
+			};
+
+			ldo9 {
+				regulator-always-on;
+			};
+
+			ldo10 {
+				regulator-always-on;
+			};
+		};
 	};
 
 	/* Key LED drivers TLC59116 at 0x60 and 0x61 (DECODED). No nodes yet. */
