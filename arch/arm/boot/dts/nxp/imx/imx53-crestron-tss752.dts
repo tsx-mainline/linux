@@ -21,6 +21,7 @@
  */
 
 /dts-v1/;
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/pwm/pwm.h>
 #include "imx53.dtsi"
 
@@ -149,6 +150,35 @@
 			};
 		};
 	};
+
+	/*
+	 * The two RGB light bars, one multicolor LED for each bar. All four
+	 * RGB LEDs of a bar show the same color. The order of the colors in
+	 * multi_index is the order of the outputs: green, blue, red for
+	 * each RGB LED. TESTED by register readback: a write to
+	 * multi_intensity and brightness sets the PWM of the right outputs on
+	 * the right chip. The visual check of red, green and blue with the
+	 * driver is pending (blue was never seen).
+	 */
+	light-bar-left {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		label = "rgb:lightbar-left";
+		leds = <&lbar_l_g1>, <&lbar_l_b1>, <&lbar_l_r1>,
+		       <&lbar_l_g2>, <&lbar_l_b2>, <&lbar_l_r2>,
+		       <&lbar_l_g3>, <&lbar_l_b3>, <&lbar_l_r3>,
+		       <&lbar_l_g4>, <&lbar_l_b4>, <&lbar_l_r4>;
+	};
+
+	light-bar-right {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		label = "rgb:lightbar-right";
+		leds = <&lbar_r_g1>, <&lbar_r_b1>, <&lbar_r_r1>,
+		       <&lbar_r_g2>, <&lbar_r_b2>, <&lbar_r_r2>,
+		       <&lbar_r_g3>, <&lbar_r_b3>, <&lbar_r_r3>,
+		       <&lbar_r_g4>, <&lbar_r_b4>, <&lbar_r_r4>;
+	};
 };
 
 &cpu0 {
@@ -195,7 +225,7 @@
 			/* Amplifier shutdown and codec reset, both held low as in the vendor kernel (DECODED) */
 			MX53_PAD_GPIO_4__GPIO1_4		0x80000000
 			MX53_PAD_PATA_DATA10__GPIO2_10		0x80000000
-			/* TLC59116 key LED reset (DECODED) */
+			/* TLC59116 reset of both light bars (DECODED) */
 			MX53_PAD_PATA_DATA7__GPIO2_7		0x80000000
 			/* Probably the PHY interrupt, not used (LIKELY) */
 			MX53_PAD_PATA_DATA4__GPIO2_4		0x80000000
@@ -332,7 +362,14 @@
 		line-name = "codec_rst";
 	};
 
-	/* The vendor releases this reset before it talks to the TLC59116 parts (DECODED). */
+	/*
+	 * "leds_rst_3v3", the reset of both TLC59116 parts, active low
+	 * (DECODED). The vendor pulses it (high, low for 1 ms, high) and
+	 * waits 1 s before it adds the I2C devices (DECODED). The mainline
+	 * driver has no reset GPIO, so the hog releases the reset when the
+	 * GPIO bank probes, long before the LED driver module loads. Both
+	 * parts answer and work with this (TESTED).
+	 */
 	leds-reset-hog {
 		gpio-hog;
 		gpios = <7 GPIO_ACTIVE_HIGH>;
@@ -496,7 +533,179 @@
 		};
 	};
 
-	/* Key LED drivers TLC59116 at 0x60 and 0x61 (DECODED). No nodes yet. */
+	/*
+	 * TLC59116 LED drivers, one for each RGB light bar (DECODED). Each
+	 * chip drives 4 RGB LEDs on the outputs 0..11: green on 3k, blue on
+	 * 3k+1, red on 3k+2 (DECODED order of the vendor driver). Outputs
+	 * 12..15 are not connected to a LED: the keys have no light (TESTED).
+	 * TESTED with raw register writes: 0x60 is the LEFT bar and 0x61 is
+	 * the RIGHT bar, green on 3k and red on 3k+2. Blue on 3k+1 is not
+	 * seen yet (LIKELY). The order of the RGB LEDs 1..4 along a bar is
+	 * not known (GUESS).
+	 *
+	 * The vendor driver uses the PWM of each output with the group
+	 * dimmer at full scale. The mainline driver uses the PWM of each
+	 * output. Both drivers write MODE1 = 0, which turns off the all-call
+	 * address 0x68 (TESTED).
+	 */
+	led-controller@60 {
+		compatible = "ti,tlc59116";
+		reg = <0x60>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		lbar_l_g1: led@0 {
+			reg = <0>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-left-1";
+		};
+
+		lbar_l_b1: led@1 {
+			reg = <1>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-left-1";
+		};
+
+		lbar_l_r1: led@2 {
+			reg = <2>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-left-1";
+		};
+
+		lbar_l_g2: led@3 {
+			reg = <3>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-left-2";
+		};
+
+		lbar_l_b2: led@4 {
+			reg = <4>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-left-2";
+		};
+
+		lbar_l_r2: led@5 {
+			reg = <5>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-left-2";
+		};
+
+		lbar_l_g3: led@6 {
+			reg = <6>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-left-3";
+		};
+
+		lbar_l_b3: led@7 {
+			reg = <7>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-left-3";
+		};
+
+		lbar_l_r3: led@8 {
+			reg = <8>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-left-3";
+		};
+
+		lbar_l_g4: led@9 {
+			reg = <9>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-left-4";
+		};
+
+		lbar_l_b4: led@a {
+			reg = <10>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-left-4";
+		};
+
+		lbar_l_r4: led@b {
+			reg = <11>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-left-4";
+		};
+	};
+
+	/* The RIGHT light bar (TESTED), the same map as 0x60. */
+	led-controller@61 {
+		compatible = "ti,tlc59116";
+		reg = <0x61>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		lbar_r_g1: led@0 {
+			reg = <0>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-right-1";
+		};
+
+		lbar_r_b1: led@1 {
+			reg = <1>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-right-1";
+		};
+
+		lbar_r_r1: led@2 {
+			reg = <2>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-right-1";
+		};
+
+		lbar_r_g2: led@3 {
+			reg = <3>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-right-2";
+		};
+
+		lbar_r_b2: led@4 {
+			reg = <4>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-right-2";
+		};
+
+		lbar_r_r2: led@5 {
+			reg = <5>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-right-2";
+		};
+
+		lbar_r_g3: led@6 {
+			reg = <6>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-right-3";
+		};
+
+		lbar_r_b3: led@7 {
+			reg = <7>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-right-3";
+		};
+
+		lbar_r_r3: led@8 {
+			reg = <8>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-right-3";
+		};
+
+		lbar_r_g4: led@9 {
+			reg = <9>;
+			color = <LED_COLOR_ID_GREEN>;
+			label = "green:lightbar-right-4";
+		};
+
+		lbar_r_b4: led@a {
+			reg = <10>;
+			color = <LED_COLOR_ID_BLUE>;
+			label = "blue:lightbar-right-4";
+		};
+
+		lbar_r_r4: led@b {
+			reg = <11>;
+			color = <LED_COLOR_ID_RED>;
+			label = "red:lightbar-right-4";
+		};
+	};
 };
 
 &i2c2 {
