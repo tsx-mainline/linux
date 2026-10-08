@@ -37,6 +37,7 @@ dtb-$(CONFIG_SOC_IMX51) += \
 	imx51-zii-scu3-esb.dtb
 dtb-$(CONFIG_SOC_IMX53) += \
 	imx53-ard.dtb \
+	imx53-crestron-tss752.dtb \
 	imx53-cx9020.dtb \
 	imx53-kp-ddc.dtb \
 	imx53-kp-hsc.dtb \

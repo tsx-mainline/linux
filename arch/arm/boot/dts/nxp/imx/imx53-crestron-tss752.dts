@@ -1,0 +1,440 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Crestron TSS-752 (xx50 family), first-light device tree.
+ *
+ * The board is a variant of the Freescale i.MX53 SMD reference design
+ * (imx53-smd.dts). The vendor Linux 3.0.15 kernel runs the "TSM750" board
+ * path for this panel (product ID 0x26). The values below come from that
+ * kernel binary (pad tables, gpio_request calls, platform data and the mode
+ * table) and from its boot log. Tags in the comments:
+ *   DECODED  read directly from the vendor kernel code or data
+ *   LIKELY   a strong inference
+ *   GUESS    not checked, test on the panel
+ *
+ * Pads with the value 0x80000000 keep the pad control value that U-Boot or
+ * the reset left. The vendor kernel also set no pad control for these pads.
+ *
+ * The stock U-Boot 2009.08 has no FDT support. The DTB is appended to the
+ * zImage (CONFIG_ARM_APPENDED_DTB) and the decompressor merges the ATAG
+ * memory banks into it (CONFIG_ARM_ATAG_DTB_COMPAT).
+ */
+
+/dts-v1/;
+#include <dt-bindings/pwm/pwm.h>
+#include "imx53.dtsi"
+
+/ {
+	model = "Crestron TSS-752";
+	compatible = "crestron,tss752", "fsl,imx53";
+
+	chosen {
+		stdout-path = &uart1;
+	};
+
+	/* Two banks of 512 MiB: U-Boot bdinfo (DECODED). The ATAGs replace it. */
+	memory@70000000 {
+		device_type = "memory";
+		reg = <0x70000000 0x20000000>,
+		      <0xb0000000 0x20000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/*
+		 * Kernel log for the next boot after a crash or a watchdog
+		 * reset. The top MiB of bank 0. Neither the vendor kernel nor
+		 * U-Boot is known to use it (GUESS).
+		 */
+		ramoops@8ff00000 {
+			compatible = "ramoops";
+			reg = <0x8ff00000 0x100000>;
+			record-size = <0x20000>;
+			console-size = <0x40000>;
+			pmsg-size = <0x20000>;
+			ecc-size = <16>;
+		};
+	};
+
+	/* Panel logic supply, "disp1-power-3V3" on GPIO1_14, active high (DECODED). */
+	reg_lcd_3v3: regulator-lcd-3v3 {
+		compatible = "regulator-fixed";
+		regulator-name = "disp1-power-3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		/* The vendor waits 15 ms before it enables the buffer (DECODED). */
+		startup-delay-us = <15000>;
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_backlight>;
+		/*
+		 * PWM2, 50000 ns (20 kHz), DECODED. The vendor driver inverts
+		 * the duty cycle for this product (DECODED); the mapping to
+		 * PWM_POLARITY_INVERTED is LIKELY.
+		 */
+		pwms = <&pwm2 0 50000 PWM_POLARITY_INVERTED>;
+		brightness-levels = <0 255>;
+		num-interpolated-steps = <255>;
+		default-brightness-level = <204>;
+		/* "disp1-bklt_en_3v3" on GPIO1_13, active high (DECODED). */
+		enable-gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
+	};
+
+	disp0: display {
+		compatible = "fsl,imx-parallel-display";
+		/* IPU DI0, 18 bit on DISP0_DAT0..17 (DECODED). "bgr666" selects RGB666_1X18. */
+		interface-pix-fmt = "bgr666";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_disp0>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			display0_in: endpoint {
+				remote-endpoint = <&ipu_di0_disp0>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			display0_out: endpoint {
+				remote-endpoint = <&panel_in>;
+			};
+		};
+	};
+
+	panel: panel {
+		compatible = "panel-dpi";
+		power-supply = <&reg_lcd_3v3>;
+		backlight = <&backlight>;
+		/* "lcd_buff_en_2v775" on GPIO5_15, active low (DECODED). */
+		enable-gpios = <&gpio5 15 GPIO_ACTIVE_LOW>;
+		/* 7 inch WVGA (GUESS for the size). */
+		width-mm = <154>;
+		height-mm = <86>;
+
+		/* Vendor mode "TSW750-WVGA" (DECODED). */
+		panel-timing {
+			clock-frequency = <33264000>;
+			hactive = <800>;
+			vactive = <480>;
+			hback-porch = <88>;
+			hfront-porch = <40>;
+			hsync-len = <128>;
+			vback-porch = <33>;
+			vfront-porch = <10>;
+			vsync-len = <2>;
+			/* Sync active low, DE active high (LIKELY). */
+			hsync-active = <0>;
+			vsync-active = <0>;
+			de-active = <1>;
+			/* The vendor sets clk_pol=1 (DECODED), pixelclk-active=1 (LIKELY). */
+			pixelclk-active = <1>;
+		};
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&display0_out>;
+			};
+		};
+	};
+};
+
+&ipu_di0_disp0 {
+	remote-endpoint = <&display0_in>;
+};
+
+&iomuxc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hog>;
+
+	pinctrl_hog: hoggrp {
+		fsl,pins = <
+			/* Scan direction straps of the panel: RL, UD (DECODED pins, LIKELY use) */
+			MX53_PAD_DISP0_DAT22__GPIO5_16		0x80000000
+			MX53_PAD_DISP0_DAT23__GPIO5_17		0x80000000
+			/* Amplifier shutdown and codec reset, both held low as in the vendor kernel (DECODED) */
+			MX53_PAD_GPIO_4__GPIO1_4		0x80000000
+			MX53_PAD_PATA_DATA10__GPIO2_10		0x80000000
+			/* TLC59116 key LED reset (DECODED) */
+			MX53_PAD_PATA_DATA7__GPIO2_7		0x80000000
+			/* Probably the PHY interrupt, not used (LIKELY) */
+			MX53_PAD_PATA_DATA4__GPIO2_4		0x80000000
+		>;
+	};
+
+	pinctrl_backlight: backlightgrp {
+		fsl,pins = <
+			MX53_PAD_GPIO_1__PWM2_PWMO		0x80000000
+			MX53_PAD_SD2_DATA2__GPIO1_13		0x80000000
+		>;
+	};
+
+	pinctrl_disp0: disp0grp {
+		fsl,pins = <
+			MX53_PAD_DI0_DISP_CLK__IPU_DI0_DISP_CLK	0x80000000
+			MX53_PAD_DI0_PIN15__IPU_DI0_PIN15	0x80000000
+			MX53_PAD_DI0_PIN2__IPU_DI0_PIN2		0x80000000
+			MX53_PAD_DI0_PIN3__IPU_DI0_PIN3		0x80000000
+			MX53_PAD_DISP0_DAT0__IPU_DISP0_DAT_0	0x80000000
+			MX53_PAD_DISP0_DAT1__IPU_DISP0_DAT_1	0x80000000
+			MX53_PAD_DISP0_DAT2__IPU_DISP0_DAT_2	0x80000000
+			MX53_PAD_DISP0_DAT3__IPU_DISP0_DAT_3	0x80000000
+			MX53_PAD_DISP0_DAT4__IPU_DISP0_DAT_4	0x80000000
+			MX53_PAD_DISP0_DAT5__IPU_DISP0_DAT_5	0x80000000
+			MX53_PAD_DISP0_DAT6__IPU_DISP0_DAT_6	0x80000000
+			MX53_PAD_DISP0_DAT7__IPU_DISP0_DAT_7	0x80000000
+			MX53_PAD_DISP0_DAT8__IPU_DISP0_DAT_8	0x80000000
+			MX53_PAD_DISP0_DAT9__IPU_DISP0_DAT_9	0x80000000
+			MX53_PAD_DISP0_DAT10__IPU_DISP0_DAT_10	0x80000000
+			MX53_PAD_DISP0_DAT11__IPU_DISP0_DAT_11	0x80000000
+			MX53_PAD_DISP0_DAT12__IPU_DISP0_DAT_12	0x80000000
+			MX53_PAD_DISP0_DAT13__IPU_DISP0_DAT_13	0x80000000
+			MX53_PAD_DISP0_DAT14__IPU_DISP0_DAT_14	0x80000000
+			MX53_PAD_DISP0_DAT15__IPU_DISP0_DAT_15	0x80000000
+			MX53_PAD_DISP0_DAT16__IPU_DISP0_DAT_16	0x80000000
+			MX53_PAD_DISP0_DAT17__IPU_DISP0_DAT_17	0x80000000
+			/* Panel supply and buffer enable (DECODED) */
+			MX53_PAD_SD2_DATA1__GPIO1_14		0x80000000
+			MX53_PAD_DISP0_DAT21__GPIO5_15		0x80000000
+		>;
+	};
+
+	pinctrl_esdhc1: esdhc1grp {
+		fsl,pins = <
+			MX53_PAD_SD1_DATA0__ESDHC1_DAT0		0x1d5
+			MX53_PAD_SD1_DATA1__ESDHC1_DAT1		0x1d5
+			MX53_PAD_SD1_DATA2__ESDHC1_DAT2		0x1d5
+			MX53_PAD_SD1_DATA3__ESDHC1_DAT3		0x1d5
+			MX53_PAD_SD1_CMD__ESDHC1_CMD		0x1d5
+			MX53_PAD_SD1_CLK__ESDHC1_CLK		0x1d5
+		>;
+	};
+
+	pinctrl_fec: fecgrp {
+		fsl,pins = <
+			MX53_PAD_FEC_MDC__FEC_MDC		0x80000000
+			MX53_PAD_FEC_MDIO__FEC_MDIO		0x80000000
+			MX53_PAD_FEC_REF_CLK__FEC_TX_CLK	0x80000000
+			MX53_PAD_FEC_RX_ER__FEC_RX_ER		0x80000000
+			MX53_PAD_FEC_CRS_DV__FEC_RX_DV		0x80000000
+			MX53_PAD_FEC_RXD1__FEC_RDATA_1		0x80000000
+			MX53_PAD_FEC_RXD0__FEC_RDATA_0		0x80000000
+			MX53_PAD_FEC_TX_EN__FEC_TX_EN		0x80000000
+			MX53_PAD_FEC_TXD1__FEC_TDATA_1		0x80000000
+			MX53_PAD_FEC_TXD0__FEC_TDATA_0		0x80000000
+			/* PHY reset (DECODED) */
+			MX53_PAD_PATA_DA_0__GPIO7_6		0x80000000
+		>;
+	};
+
+	pinctrl_i2c1: i2c1grp {
+		fsl,pins = <
+			MX53_PAD_CSI0_DAT8__I2C1_SDA		0x400001ed
+			MX53_PAD_CSI0_DAT9__I2C1_SCL		0x400001ed
+		>;
+	};
+
+	pinctrl_i2c2: i2c2grp {
+		fsl,pins = <
+			MX53_PAD_KEY_ROW3__I2C2_SDA		0x400001ed
+			MX53_PAD_KEY_COL3__I2C2_SCL		0x400001ed
+		>;
+	};
+
+	pinctrl_i2c3: i2c3grp {
+		fsl,pins = <
+			MX53_PAD_GPIO_6__I2C3_SDA		0x400001ed
+			MX53_PAD_GPIO_3__I2C3_SCL		0x400001ed
+		>;
+	};
+
+	pinctrl_pmic: pmicgrp {
+		fsl,pins = <
+			MX53_PAD_GPIO_16__GPIO7_11		0x80000000
+		>;
+	};
+
+	pinctrl_touch: touchgrp {
+		fsl,pins = <
+			MX53_PAD_EIM_DA3__GPIO3_3		0x80000000
+			MX53_PAD_EIM_DA4__GPIO3_4		0x80000000
+		>;
+	};
+
+	pinctrl_uart1: uart1grp {
+		fsl,pins = <
+			MX53_PAD_CSI0_DAT10__UART1_TXD_MUX	0x1c5
+			MX53_PAD_CSI0_DAT11__UART1_RXD_MUX	0x1c5
+		>;
+	};
+
+	pinctrl_wdog1: wdog1grp {
+		fsl,pins = <
+			MX53_PAD_GPIO_9__WDOG1_WDOG_B		0x80000000
+		>;
+	};
+};
+
+&gpio1 {
+	amp-shutdown-hog {
+		gpio-hog;
+		gpios = <4 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "amp_sd_n";
+	};
+};
+
+&gpio2 {
+	codec-reset-hog {
+		gpio-hog;
+		gpios = <10 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "codec_rst";
+	};
+
+	/* The vendor releases this reset before it talks to the TLC59116 parts (DECODED). */
+	leds-reset-hog {
+		gpio-hog;
+		gpios = <7 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "leds_rst";
+	};
+};
+
+&gpio5 {
+	/* Values as in the vendor kernel: RL high, UD low (DECODED). */
+	disp-rl-hog {
+		gpio-hog;
+		gpios = <16 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "disp1_rl";
+	};
+
+	disp-ud-hog {
+		gpio-hog;
+		gpios = <17 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "disp1_ud";
+	};
+};
+
+/* The boot card. The vendor uses GPIO3_13 as card detect, but the slot is
+ * the boot device, so the card is always present. */
+&esdhc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_esdhc1>;
+	bus-width = <4>;
+	non-removable;
+	no-1-8-v;
+	status = "okay";
+};
+
+&fec {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_fec>;
+	/* RMII, the 50 MHz reference enters on FEC_REF_CLK (DECODED). */
+	phy-mode = "rmii";
+	/* Active low pulse of 1 ms (DECODED). */
+	phy-reset-gpios = <&gpio7 6 GPIO_ACTIVE_LOW>;
+	phy-reset-duration = <1>;
+	phy-handle = <&ethphy>;
+	status = "okay";
+
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* MDIO address 0, generic PHY, no interrupt (vendor boot log). */
+		ethphy: ethernet-phy@0 {
+			reg = <0>;
+		};
+	};
+};
+
+&i2c1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c1>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	/* DA9053 at 0x48, IRQ on GPIO7_11 level low (DECODED). */
+	pmic: pmic@48 {
+		compatible = "dlg,da9053-aa", "dlg,da9052";
+		reg = <0x48>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_pmic>;
+		interrupt-parent = <&gpio7>;
+		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+		/*
+		 * No regulators node: the kernel leaves all rails as U-Boot
+		 * set them. The TSI pins are not a touch screen here.
+		 */
+		dlg,tsi-as-adc;
+	};
+
+	/* Key LED drivers TLC59116 at 0x60 and 0x61 (DECODED). No nodes yet. */
+};
+
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c2>;
+	clock-frequency = <400000>;
+	status = "okay";
+
+	/* TLV320AIC3204 codec at 0x18 (DECODED). No node yet: no audio in first light. */
+
+	/* ST M24M01, 1 Mbit, at 0x54 (DECODED). Read only. */
+	eeprom@54 {
+		compatible = "st,24c1024", "atmel,24c1024";
+		reg = <0x54>;
+		pagesize = <256>;
+		read-only;
+	};
+};
+
+&i2c3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_i2c3>;
+	clock-frequency = <100000>;
+	status = "okay";
+
+	/* FocalTech FT5x06 at 0x38 (DECODED). */
+	touchscreen@38 {
+		compatible = "edt,edt-ft5406";
+		reg = <0x38>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_touch>;
+		/* "cap_ts_int_n" GPIO3_4, edge (DECODED pin, LIKELY trigger). */
+		interrupt-parent = <&gpio3>;
+		interrupts = <4 IRQ_TYPE_EDGE_FALLING>;
+		/* "cap_ts_rst_n" GPIO3_3, active low (DECODED). */
+		reset-gpios = <&gpio3 3 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&pwm2 {
+	status = "okay";
+};
+
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_uart1>;
+	status = "okay";
+};
+
+&wdog1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_wdog1>;
+	status = "okay";
+};
