@@ -423,18 +423,103 @@
 		reset-gpios = <&gpio3 3 GPIO_ACTIVE_LOW>;
 		/*
 		 * The controller reports as "generic ft5x06" and gives no size,
-		 * so the driver uses 0..65535 for each axis. A four-corner
+		 * so the driver uses 0..65535 for each axis. The vendor kernel
+		 * (platform data of the "750" boards, also used by the TSS-752)
+		 * sets the touch space to x 0..1600 and y 0..1024 (DECODED):
+		 * the vendor driver gives these values to Android as the
+		 * ABS_MT_POSITION_X and _Y ranges, with no offset. A four-corner
 		 * calibration (TESTED) gave top left (15, 40), top right
 		 * (1582, 50), bottom right (1585, 976) and bottom left
-		 * (39, 968): no axis swap and no inversion. The picture is about
-		 * 1600 x 960 touch units, two times the display resolution.
-		 * The glass reports touches past the picture, up to about
-		 * X 1760 and Y 1020 (mostly on the right side). The glass has
-		 * printed keys to the right of the picture, so the area past
-		 * X 1600 holds key zones. The zones are not mapped yet.
+		 * (39, 968): no axis swap and no inversion. With a height of
+		 * 1024, the taps are about the same distance from the top and
+		 * from the bottom edge. Free touches reached Y 1020. The height
+		 * 1024 is TESTED: a tap on the bottom edge of the picture gave
+		 * Y 982, and a tap in the middle gave X 823, Y 458.
 		 */
 		touchscreen-size-x = <1600>;
-		touchscreen-size-y = <960>;
+		touchscreen-size-y = <1024>;
+
+		/*
+		 * Five touch keys right of the picture, not lit. Vendor key
+		 * zones (DECODED, crestSoftKeys and the "750" platform data):
+		 * a touch with x > 1600 is a key touch. Key N is pressed when
+		 * |y - center| < 50. The centers are 77, 300, 521, 732 and 964,
+		 * top to bottom. The x range has no upper limit in the vendor
+		 * code. Here it ends at 2047. The vendor key codes are
+		 * KEY_BACK, KEY_HOME, KEY_MENU, KEY_VOLUMEUP and
+		 * KEY_VOLUMEDOWN. This board uses the key codes of the xx60
+		 * panels in the same order: KEY_F13..KEY_F17, top to bottom.
+		 *
+		 * Check (one tap on each key, top to bottom): x 1715..1768,
+		 * y 49..108, 306..340, 501..510, 723..728 and 941..947. Each
+		 * tap is in its vendor zone.
+		 *
+		 * TESTED with this overlay: one tap on each key, top to bottom,
+		 * gave KEY_F13..KEY_F17 in this order, each a press and a
+		 * release, with no touch events. Taps on the picture gave
+		 * touch events and no key events. The printed key symbols are
+		 * power, home, lights, up and down, top to bottom, the same as
+		 * on the xx60 panels.
+		 *
+		 * The vendor driver also drops small moves for 100 ms after a
+		 * touch starts on the picture (20 units), and limits y on the
+		 * picture to 1004. The mainline driver does not do this.
+		 * Contacts outside the picture and the key zones are dropped.
+		 */
+		touch-overlay {
+			segment-screen {
+				label = "screen";
+				x-origin = <0>;
+				x-size = <1600>;
+				y-origin = <0>;
+				y-size = <1024>;
+			};
+
+			segment-key1 {
+				label = "key1";
+				linux,code = <KEY_F13>;
+				x-origin = <1601>;
+				x-size = <447>;
+				y-origin = <28>;
+				y-size = <99>;
+			};
+
+			segment-key2 {
+				label = "key2";
+				linux,code = <KEY_F14>;
+				x-origin = <1601>;
+				x-size = <447>;
+				y-origin = <251>;
+				y-size = <99>;
+			};
+
+			segment-key3 {
+				label = "key3";
+				linux,code = <KEY_F15>;
+				x-origin = <1601>;
+				x-size = <447>;
+				y-origin = <472>;
+				y-size = <99>;
+			};
+
+			segment-key4 {
+				label = "key4";
+				linux,code = <KEY_F16>;
+				x-origin = <1601>;
+				x-size = <447>;
+				y-origin = <683>;
+				y-size = <99>;
+			};
+
+			segment-key5 {
+				label = "key5";
+				linux,code = <KEY_F17>;
+				x-origin = <1601>;
+				x-size = <447>;
+				y-origin = <915>;
+				y-size = <99>;
+			};
+		};
 	};
 };
 
