@@ -23,6 +23,7 @@
 /dts-v1/;
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/pwm/pwm.h>
+#include <dt-bindings/sound/fsl-imx-audmux.h>
 #include "imx53.dtsi"
 
 / {
@@ -179,6 +180,119 @@
 		       <&lbar_r_g3>, <&lbar_r_b3>, <&lbar_r_r3>,
 		       <&lbar_r_g4>, <&lbar_r_b4>, <&lbar_r_r4>;
 	};
+
+	/* Codec IO supply (GUESS: 3.3 V, the codec answers on I2C2 at 3.3 V levels). */
+	reg_codec_iov: regulator-codec-iov {
+		compatible = "regulator-fixed";
+		regulator-name = "codec-iov";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
+
+	/*
+	 * Codec LDOIN (LIKELY 1.8 V: the vendor sets the LDOIN range
+	 * 1.5..1.95 V). With LDOIN and no AVDD supply, the driver turns on
+	 * the internal AVDD LDO, as the vendor does (DECODED).
+	 */
+	reg_codec_ldoin: regulator-codec-ldoin {
+		compatible = "regulator-fixed";
+		regulator-name = "codec-ldoin";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	/*
+	 * Speaker amplifier on LOL/LOR. "amp_sd_n_tsm750" on GPIO1_4, high =
+	 * on (DECODED). DAPM turns it on only while a stream plays, as the
+	 * vendor does (TESTED: high during a stream, low 5 s after it).
+	 * TESTED without a listener: the card plays at 8, 16, 44.1 and
+	 * 48 kHz at the correct speed. A check that the speaker gives clean
+	 * sound is pending.
+	 */
+	speaker_amp: audio-amplifier {
+		compatible = "simple-audio-amplifier";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_amp>;
+		enable-gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;
+		sound-name-prefix = "Speaker Amp";
+	};
+
+	sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "tss752-aic3204";
+		/* I2S, the codec is the bit clock and frame master (DECODED). */
+		simple-audio-card,format = "i2s";
+		simple-audio-card,bitclock-master = <&codec_dai>;
+		simple-audio-card,frame-master = <&codec_dai>;
+		simple-audio-card,widgets = "Speaker", "Speaker";
+		/* LOL/LOR feed the amplifier (DECODED routes, LIKELY wiring). */
+		simple-audio-card,routing =
+			"Speaker Amp INL", "LOL",
+			"Speaker Amp INR", "LOR",
+			"Speaker", "Speaker Amp OUTL",
+			"Speaker", "Speaker Amp OUTR";
+		simple-audio-card,aux-devs = <&speaker_amp>;
+
+		/* SSI2, AUDMUX port 2 to port 5 (DECODED) */
+		simple-audio-card,cpu {
+			sound-dai = <&ssi2>;
+		};
+
+		codec_dai: simple-audio-card,codec {
+			sound-dai = <&codec>;
+		};
+	};
+};
+
+&audmux {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_audmux>;
+	status = "okay";
+
+	/* SSI2 (port 2) is the slave: clock and frame come from port 5 (DECODED). */
+	mux-ssi2 {
+		fsl,audmux-port = <MX51_AUDMUX_PORT2_SSI1>;
+		fsl,port-config = <
+			(IMX_AUDMUX_V2_PTCR_TFSDIR |
+			 IMX_AUDMUX_V2_PTCR_TFSEL(MX51_AUDMUX_PORT5) |
+			 IMX_AUDMUX_V2_PTCR_TCLKDIR |
+			 IMX_AUDMUX_V2_PTCR_TCSEL(MX51_AUDMUX_PORT5) |
+			 IMX_AUDMUX_V2_PTCR_SYN)
+			IMX_AUDMUX_V2_PDCR_RXDSEL(MX51_AUDMUX_PORT5)
+		>;
+	};
+
+	/* Port 5 is the AUD5 pads to the codec (DECODED). */
+	mux-aud5 {
+		fsl,audmux-port = <MX51_AUDMUX_PORT5>;
+		fsl,port-config = <
+			IMX_AUDMUX_V2_PTCR_SYN
+			IMX_AUDMUX_V2_PDCR_RXDSEL(MX51_AUDMUX_PORT2_SSI1)
+		>;
+	};
+};
+
+/*
+ * Codec MCLK: CCM SSI_EXT1 at 24 MHz from the 24 MHz oscillator through
+ * lp_apm and ssi_apm, both dividers 1 (DECODED, the vendor clock path).
+ * Set it here, when the clock provider registers. simple-audio-card reads
+ * the MCLK rate before the codec probes and gives it to the codec as its
+ * system clock, so the rate must be correct before the codec probes
+ * (TESTED: with these values in the codec node, MCLK stayed at the boot
+ * value 24 MHz / 7).
+ */
+&clks {
+	assigned-clocks = <&clks IMX5_CLK_SSI_APM>,
+			  <&clks IMX5_CLK_SSI_EXT1_SEL>,
+			  <&clks IMX5_CLK_SSI_EXT1_COM_SEL>,
+			  <&clks IMX5_CLK_SSI_EXT1_PRED>,
+			  <&clks IMX5_CLK_SSI_EXT1_PODF>;
+	assigned-clock-parents = <&clks IMX5_CLK_LP_APM>,
+				 <&clks IMX5_CLK_SSI_APM>,
+				 <&clks IMX5_CLK_SSI_EXT1_PODF>;
+	assigned-clock-rates = <0>, <0>, <0>, <24000000>, <24000000>;
 };
 
 &cpu0 {
@@ -222,9 +336,6 @@
 			/* Scan direction straps of the panel: RL, UD (DECODED pins, LIKELY use) */
 			MX53_PAD_DISP0_DAT22__GPIO5_16		0x80000000
 			MX53_PAD_DISP0_DAT23__GPIO5_17		0x80000000
-			/* Amplifier shutdown and codec reset, both held low as in the vendor kernel (DECODED) */
-			MX53_PAD_GPIO_4__GPIO1_4		0x80000000
-			MX53_PAD_PATA_DATA10__GPIO2_10		0x80000000
 			/* TLC59116 reset of both light bars (DECODED) */
 			MX53_PAD_PATA_DATA7__GPIO2_7		0x80000000
 			/* Probably the PHY interrupt, not used (LIKELY) */
@@ -232,10 +343,34 @@
 		>;
 	};
 
+	pinctrl_amp: ampgrp {
+		fsl,pins = <
+			MX53_PAD_GPIO_4__GPIO1_4		0x80000000
+		>;
+	};
+
+	pinctrl_audmux: audmuxgrp {
+		fsl,pins = <
+			MX53_PAD_KEY_COL0__AUDMUX_AUD5_TXC	0x80000000
+			MX53_PAD_KEY_ROW0__AUDMUX_AUD5_TXD	0x80000000
+			MX53_PAD_KEY_COL1__AUDMUX_AUD5_TXFS	0x80000000
+			MX53_PAD_KEY_ROW1__AUDMUX_AUD5_RXD	0x80000000
+		>;
+	};
+
 	pinctrl_backlight: backlightgrp {
 		fsl,pins = <
 			MX53_PAD_GPIO_1__PWM2_PWMO		0x80000000
 			MX53_PAD_SD2_DATA2__GPIO1_13		0x80000000
+		>;
+	};
+
+	pinctrl_codec: codecgrp {
+		fsl,pins = <
+			/* MCLK out (DECODED). The QSB uses 0x1c4, the vendor sets no pad control. */
+			MX53_PAD_GPIO_0__CCM_SSI_EXT1_CLK	0x80000000
+			/* Codec reset (DECODED) */
+			MX53_PAD_PATA_DATA10__GPIO2_10		0x80000000
 		>;
 	};
 
@@ -345,23 +480,7 @@
 	};
 };
 
-&gpio1 {
-	amp-shutdown-hog {
-		gpio-hog;
-		gpios = <4 GPIO_ACTIVE_HIGH>;
-		output-low;
-		line-name = "amp_sd_n";
-	};
-};
-
 &gpio2 {
-	codec-reset-hog {
-		gpio-hog;
-		gpios = <10 GPIO_ACTIVE_HIGH>;
-		output-low;
-		line-name = "codec_rst";
-	};
-
 	/*
 	 * "leds_rst_3v3", the reset of both TLC59116 parts, active low
 	 * (DECODED). The vendor pulses it (high, low for 1 ms, high) and
@@ -714,7 +833,21 @@
 	clock-frequency = <400000>;
 	status = "okay";
 
-	/* TLV320AIC3204 codec at 0x18 (DECODED). No node yet: no audio in first light. */
+	/* TLV320AIC3204 codec at 0x18 (DECODED). */
+	codec: audio-codec@18 {
+		compatible = "ti,tlv320aic32x4";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_codec>;
+		/* MCLK is CCM SSI_EXT1 on the GPIO_0 pad, 24 MHz (see &clks, TESTED). */
+		clocks = <&clks IMX5_CLK_SSI_EXT1_GATE>;
+		clock-names = "mclk";
+		/* "codec_rst_3v3", active low (DECODED). The driver releases it at probe. */
+		reset-gpios = <&gpio2 10 GPIO_ACTIVE_LOW>;
+		iov-supply = <&reg_codec_iov>;
+		ldoin-supply = <&reg_codec_ldoin>;
+	};
 
 	/* ST M24M01, 1 Mbit, at 0x54 (DECODED). Read only. */
 	eeprom@54 {
@@ -845,6 +978,11 @@
 };
 
 &pwm2 {
+	status = "okay";
+};
+
+/* The CPU side of the codec link, I2S slave (DECODED). */
+&ssi2 {
 	status = "okay";
 };
 
