@@ -10,6 +10,7 @@
  *   DECODED  read directly from the vendor kernel code or data
  *   LIKELY   a strong inference
  *   GUESS    not checked, test on the panel
+ *   TESTED   checked on the panel
  *
  * Pads with the value 0x80000000 keep the pad control value that U-Boot or
  * the reset left. The vendor kernel also set no pad control for these pads.
@@ -415,11 +416,25 @@
 		reg = <0x38>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_touch>;
-		/* "cap_ts_int_n" GPIO3_4, edge (DECODED pin, LIKELY trigger). */
+		/* "cap_ts_int_n" GPIO3_4, falling edge (DECODED pin, TESTED trigger). */
 		interrupt-parent = <&gpio3>;
 		interrupts = <4 IRQ_TYPE_EDGE_FALLING>;
 		/* "cap_ts_rst_n" GPIO3_3, active low (DECODED). */
 		reset-gpios = <&gpio3 3 GPIO_ACTIVE_LOW>;
+		/*
+		 * The controller reports as "generic ft5x06" and gives no size,
+		 * so the driver uses 0..65535 for each axis. A four-corner
+		 * calibration (TESTED) gave top left (15, 40), top right
+		 * (1582, 50), bottom right (1585, 976) and bottom left
+		 * (39, 968): no axis swap and no inversion. The picture is about
+		 * 1600 x 960 touch units, two times the display resolution.
+		 * The glass reports touches past the picture, up to about
+		 * X 1760 and Y 1020 (mostly on the right side). The glass has
+		 * printed keys to the right of the picture, so the area past
+		 * X 1600 holds key zones. The zones are not mapped yet.
+		 */
+		touchscreen-size-x = <1600>;
+		touchscreen-size-y = <960>;
 	};
 };
 
