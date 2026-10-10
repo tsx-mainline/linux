@@ -618,6 +618,136 @@ static const struct hx8394_panel_desc hl055fhav028c_desc = {
 	.init_sequence = hl055fhav028c_init_sequence,
 };
 
+/*
+ * Truly 5" module of the Crestron TSW-570 (downstream "hx8394f_720p_video").
+ * The vendor ends with "exit sleep", 150 ms, "display on" and 50 ms.
+ */
+static void crestron_tswxx70_hx8394f_init_sequence(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	/* 5.19.8 SETEXTC: Set extension command (B9h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETEXTC,
+				     0xff, 0x83, 0x94);
+
+	/* 5.19.9 SETMIPI: Set MIPI control (BAh) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETMIPI,
+				     0x63, 0x03, 0x68, 0x6b, 0xb2, 0xc0);
+
+	/* 5.19.2 SETPOWER: Set power (B1h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETPOWER,
+				     0x48, 0x17, 0x77, 0x01, 0x32, 0x54, 0x73, 0x33, 0x57, 0x2f);
+
+	/* 5.19.3 SETDISP: Set display related register (B2h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETDISP,
+				     0x00, 0x80, 0x64, 0x06, 0x0e, 0x2f);
+
+	/* 5.19.4 SETCYC: Set display waveform cycles (B4h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETCYC,
+				     0x01, 0x70, 0x01, 0x70, 0x01, 0x70, 0x01, 0x0c, 0x76, 0x35,
+				     0x00, 0x3f, 0x01, 0x70, 0x01, 0x70, 0x01, 0x70, 0x01, 0x0c,
+				     0x76);
+
+	/* 5.19.19 SETGIP0: Set GIP Option0 (D3h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETGIP0,
+				     0x00, 0x00, 0x00, 0x00, 0x08, 0x08, 0x10, 0x10, 0x32, 0x10,
+				     0x03, 0x00, 0x03, 0x32, 0x15, 0x07, 0x05, 0x07, 0x32, 0x10,
+				     0x08, 0x00, 0x00, 0x17, 0x01, 0x07, 0x07, 0x17, 0x05, 0x05,
+				     0x17, 0x06, 0x40);
+
+	/* 5.19.20 Set GIP Option1 (D5h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETGIP1,
+				     0x18, 0x18, 0x18, 0x18, 0x26, 0x27, 0x24, 0x25, 0x06, 0x07,
+				     0x04, 0x05, 0x02, 0x03, 0x00, 0x01, 0x18, 0x18, 0x18, 0x18,
+				     0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18,
+				     0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x20, 0x21, 0x22, 0x23,
+				     0x18, 0x18, 0x18, 0x18);
+
+	/* 5.19.21 Set GIP Option2 (D6h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETGIP2,
+				     0x18, 0x18, 0x18, 0x18, 0x21, 0x20, 0x23, 0x22, 0x01, 0x00,
+				     0x03, 0x02, 0x05, 0x04, 0x07, 0x06, 0x18, 0x18, 0x18, 0x18,
+				     0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18,
+				     0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x27, 0x26, 0x25, 0x24,
+				     0x18, 0x18, 0x18, 0x18);
+
+	/* 5.19.25 SETGAMMA: Set gamma curve related setting (E0h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETGAMMA,
+				     0x00, 0x23, 0x2d, 0x33, 0x35, 0x39, 0x3b, 0x39, 0x73, 0x81,
+				     0x8e, 0x8b, 0x91, 0x9f, 0xa1, 0xa5, 0xb2, 0xb2, 0xae, 0xbc,
+				     0xc9, 0x63, 0x61, 0x65, 0x68, 0x6b, 0x72, 0x7e, 0x7f, 0x00,
+				     0x23, 0x2d, 0x33, 0x35, 0x39, 0x3b, 0x39, 0x73, 0x81, 0x8e,
+				     0x8b, 0x91, 0xa0, 0xa2, 0xa6, 0xb2, 0xb3, 0xaf, 0xbd, 0xc9,
+				     0x63, 0x61, 0x65, 0x68, 0x6b, 0x72, 0x7e, 0x7f);
+
+	/* 5.19.17 SETPANEL (CCh) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETPANEL,
+				     0x0b);
+
+	/* Unknown command, not listed in the HX8394-F datasheet (C0h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_UNKNOWN1,
+				     0x1f, 0x73);
+
+	/* 5.19.5 SETVCOM: Set VCOM voltage (B6h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETVCOM,
+				     0x4e, 0x52);
+
+	/* SETOFFSET: Set offset voltage (D2h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETOFFSET,
+				     0xaa);
+
+	/* Unknown command, not listed in the HX8394-F datasheet (D4h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_UNKNOWN3,
+				     0x02);
+
+	/* 5.19.11 Set register bank (BDh) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETREGBANK,
+				     0x01);
+
+	/* Address mode (36h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, MIPI_DCS_SET_ADDRESS_MODE,
+				     0x00);
+
+	/* 5.19.2 SETPOWER: Set power (B1h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETPOWER,
+				     0x00);
+
+	/* 5.19.11 Set register bank (BDh) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_SETREGBANK,
+				     0x00);
+
+	/* Unknown command, not listed in the HX8394-F datasheet (BFh) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_UNKNOWN5,
+				     0x40, 0x81, 0x50, 0x00, 0x1a, 0xfc, 0x01);
+
+	/* Unknown command, not listed in the HX8394-F datasheet (C6h) */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, HX8394_CMD_UNKNOWN2,
+				     0xef);
+}
+
+static const struct drm_display_mode crestron_tswxx70_hx8394f_mode = {
+	.hdisplay    = 720,
+	.hsync_start = 720 + 72,
+	.hsync_end   = 720 + 72 + 20,
+	.htotal	     = 720 + 72 + 20 + 60,
+	.vdisplay    = 1280,
+	.vsync_start = 1280 + 20,
+	.vsync_end   = 1280 + 20 + 4,
+	.vtotal	     = 1280 + 20 + 4 + 27,
+	.clock	     = (720 + 72 + 20 + 60) * (1280 + 20 + 4 + 27) * 60 / 1000,
+	/* The vendor gives no size. This is the size of the EDT 5" module. */
+	.width_mm    = 62,
+	.height_mm   = 110,
+};
+
+static const struct hx8394_panel_desc crestron_tswxx70_hx8394f_desc = {
+	.mode = &crestron_tswxx70_hx8394f_mode,
+	.lanes = 4,
+	/* Continuous clock: the vendor bootloader keeps the clock lane in HS mode. */
+	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+		      MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_LPM,
+	.format = MIPI_DSI_FMT_RGB888,
+	.init_sequence = crestron_tswxx70_hx8394f_init_sequence,
+};
+
 static int hx8394_enable(struct drm_panel *panel)
 {
 	struct hx8394 *ctx = panel_to_hx8394(panel);
@@ -826,6 +956,7 @@ static const struct of_device_id hx8394_of_match[] = {
 	{ .compatible = "huiling,hl055fhav028c", .data = &hl055fhav028c_desc },
 	{ .compatible = "powkiddy,x55-panel", .data = &powkiddy_x55_desc },
 	{ .compatible = "microchip,ac40t08a-mipi-panel", .data = &mchp_ac40t08a_desc },
+	{ .compatible = "crestron,tswxx70-hx8394f-truly", .data = &crestron_tswxx70_hx8394f_desc },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, hx8394_of_match);
