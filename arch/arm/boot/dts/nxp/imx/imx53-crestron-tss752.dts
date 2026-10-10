@@ -226,13 +226,23 @@
 		simple-audio-card,format = "i2s";
 		simple-audio-card,bitclock-master = <&codec_dai>;
 		simple-audio-card,frame-master = <&codec_dai>;
-		simple-audio-card,widgets = "Speaker", "Speaker";
-		/* LOL/LOR feed the amplifier (DECODED routes, LIKELY wiring). */
+		simple-audio-card,widgets =
+			"Speaker", "Speaker",
+			"Microphone", "Digital Mic";
+		/*
+		 * LOL/LOR feed the amplifier (DECODED routes, LIKELY wiring).
+		 * The digital microphone is on the DMIC input of the codec
+		 * (DECODED). MICBIAS from LDOIN is probably its supply (LIKELY:
+		 * the vendor keeps MICBIAS on, the codec has no analog
+		 * microphone).
+		 */
 		simple-audio-card,routing =
 			"Speaker Amp INL", "LOL",
 			"Speaker Amp INR", "LOR",
 			"Speaker", "Speaker Amp OUTL",
-			"Speaker", "Speaker Amp OUTR";
+			"Speaker", "Speaker Amp OUTR",
+			"DMIC", "Digital Mic",
+			"Digital Mic", "Mic Bias";
 		simple-audio-card,aux-devs = <&speaker_amp>;
 
 		/* SSI2, AUDMUX port 2 to port 5 (DECODED) */
@@ -847,6 +857,21 @@
 		reset-gpios = <&gpio2 10 GPIO_ACTIVE_LOW>;
 		iov-supply = <&reg_codec_iov>;
 		ldoin-supply = <&reg_codec_ldoin>;
+		/*
+		 * Digital (PDM) microphone: data on SCLK/MFP3, clock from
+		 * MISO/MFP4 (DECODED: the vendor writes ADC setup = 0xdc and
+		 * MISO/MFP4 = 0x0e). The clock is ADC_MOD_CLK: 2.048 MHz at
+		 * 16 kHz, 1.024 MHz at 8 kHz (the vendor rate). TESTED: capture
+		 * at 16 kHz, one microphone (left = right).
+		 */
+		ti,dmic-data-pin = <1>;		/* AIC32X4_DMIC_DATA_MFP3 */
+		aic32x4-gpio-func = <
+			0xff	/* MFP1 DIN: default */
+			0xff	/* MFP2 DOUT: default */
+			0xff	/* MFP3 SCLK: default, the microphone data input */
+			0x0e	/* MFP4 MISO: AIC32X4_MFP4_DMIC_CLK */
+			0xff	/* MFP5 GPIO: default */
+		>;
 	};
 
 	/* ST M24M01, 1 Mbit, at 0x54 (DECODED). Read only. */
