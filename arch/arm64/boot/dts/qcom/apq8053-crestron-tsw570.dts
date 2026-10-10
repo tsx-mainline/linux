@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Crestron TSW-570: 5" EDT ILI9881D 720x1280 panel, mounted landscape.
+ * Stock bootloader SKU 2.
+ */
+/dts-v1/;
+
+#include "apq8053-crestron-tswxx70.dtsi"
+
+/ {
+	model = "Crestron TSW-570";
+	compatible = "crestron,tsw570", "crestron,tswxx70", "qcom,apq8053", "qcom,msm8953";
+
+	/*
+	 * All TSW-xx70 boards report the same board ID. lk2nd selects this
+	 * DTB with subtype 2 (the stock SKU) when the stock bootloader
+	 * reports the ILI9881D panel.
+	 */
+	qcom,board-id = <QCOM_BOARD_ID_QRD 2>;
+};
+
+&gpu_zap_shader {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/a506_zap.mbn";
+};
+
+&lpass {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/adsp.mbn";
+};
+
+&panel {
+	compatible = "crestron,tswxx70-ili9881d-edt", "ilitek,ili9881c";
+	/delete-property/ vdd-supply;
+	/delete-property/ vccio-supply;
+	power-supply = <&panel_vdd>;
+};
+
+&touchscreen {
+	/* The controller is configured for the landscape mounting. */
+	touchscreen-size-x = <1280>;
+	touchscreen-size-y = <720>;
+};
+
+&wcnss {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/wcnss.mbn";
+};
+
+&wcnss_ctrl {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/WCNSS_qcom_wlan_nv.bin";
+};
