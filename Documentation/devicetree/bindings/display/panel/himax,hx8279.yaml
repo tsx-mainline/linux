@@ -25,6 +25,8 @@ properties:
     items:
       - enum:
           - aoly,sl101pm1794fog-v15
+          - crestron,tswxx70-hx8279d-edt
+          - crestron,tswxx70-hx8279d-truly
           - startek,kd070fhfid078
       - const: himax,hx8279
 
