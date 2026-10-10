@@ -20,6 +20,7 @@ properties:
     oneOf:
       - items:
           - enum:
+              - crestron,tswxx70-hx8394f-truly
               - hannstar,hsd060bhw4
               - microchip,ac40t08a-mipi-panel
               - powkiddy,x55-panel
