@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Crestron TSW-570 with the 5" Truly HX8394-F 720x1280 panel, mounted
+ * landscape. Stock bootloader SKU 26.
+ */
+
+#include "apq8053-crestron-tsw570.dts"
+
+/ {
+	/*
+	 * lk2nd selects this DTB when the stock bootloader reports the
+	 * HX8394-F panel.
+	 */
+	qcom,board-id = <QCOM_BOARD_ID_QRD 26>;
+};
+
+&panel {
+	compatible = "crestron,tswxx70-hx8394f-truly", "himax,hx8394";
+	/delete-property/ power-supply;
+	vcc-supply = <&panel_vdd>;
+	iovcc-supply = <&pm8953_l6>;
+};

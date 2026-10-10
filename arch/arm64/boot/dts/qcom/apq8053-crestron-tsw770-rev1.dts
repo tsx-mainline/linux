@@ -1,0 +1,19 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Crestron TSW-770 with the 7" EDT JD9366AB-3 800x1280 panel (LCD
+ * revision 1), mounted landscape. Stock bootloader SKU 14.
+ */
+
+#include "apq8053-crestron-tsw770.dts"
+
+/ {
+	/*
+	 * lk2nd selects this DTB when the stock bootloader reports the
+	 * JD9366AB-3 panel.
+	 */
+	qcom,board-id = <QCOM_BOARD_ID_QRD 14>;
+};
+
+&panel {
+	compatible = "crestron,tswxx70-jd9366ab3-edt", "jadard,jd9365da-h3";
+};

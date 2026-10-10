@@ -1,0 +1,32 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Crestron TSW-1070 and TSS-1070 with the 10" Truly HX8279-D 1200x1920
+ * panel, mounted landscape. Stock bootloader SKU 42.
+ */
+
+#include "apq8053-crestron-tsw1070.dts"
+
+/ {
+	/*
+	 * lk2nd selects this DTB when the stock bootloader reports the
+	 * Truly HX8279-D panel.
+	 */
+	qcom,board-id = <QCOM_BOARD_ID_QRD 42>;
+};
+
+&panel {
+	compatible = "crestron,tswxx70-hx8279d-truly", "himax,hx8279";
+	/*
+	 * The hx8279 driver drives reset-gpios to 1 to run the panel. GPIO61
+	 * high holds the panel in reset, so the line is active low here.
+	 */
+	reset-gpios = <&tlmm 61 GPIO_ACTIVE_LOW>;
+	/delete-property/ vccio-supply;
+	iovcc-supply = <&pm8953_l6>;
+};
+
+&touchscreen {
+	/* The vendor device tree gives this range for the Truly panel. */
+	touchscreen-size-x = <1920>;
+	touchscreen-size-y = <1200>;
+};
