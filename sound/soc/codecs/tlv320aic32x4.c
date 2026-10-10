@@ -982,8 +982,11 @@ static void aic32x4_setup_gpios(struct snd_soc_component *component)
 	if (aic32x4->setup->gpio_func[3] != AIC32X4_MFPX_DEFAULT_VALUE) {
 		snd_soc_component_write(component, AIC32X4_MISOCTL,
 			  aic32x4->setup->gpio_func[3]);
-		snd_soc_add_component_controls(component, aic32x4_mfp4,
-			ARRAY_SIZE(aic32x4_mfp4));
+		/* The control only drives a general purpose output. */
+		if ((aic32x4->setup->gpio_func[3] & AIC32X4_MFP4_FUNC_MASK) ==
+		    AIC32X4_MFP_GPIO_ENABLED)
+			snd_soc_add_component_controls(component, aic32x4_mfp4,
+				ARRAY_SIZE(aic32x4_mfp4));
 	}
 
 	/* MFP5 */

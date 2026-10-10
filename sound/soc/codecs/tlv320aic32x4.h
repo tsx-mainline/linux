@@ -190,6 +190,9 @@ int aic32x4_register_clocks(struct device *dev, const char *mclk_name);
 /* AIC32X4_DACMUTE */
 #define AIC32X4_MUTEON			0x0C
 
+/* AIC32X4_MISOCTL */
+#define AIC32X4_MFP4_FUNC_MASK		GENMASK(4, 1)
+
 /* AIC32X4_ADCSETUP */
 #define AIC32X4_LADC_EN			BIT(7)
 #define AIC32X4_RADC_EN			BIT(6)
