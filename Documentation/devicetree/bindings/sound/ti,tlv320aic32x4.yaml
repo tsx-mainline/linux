@@ -57,6 +57,16 @@ properties:
     minItems: 5
     maxItems: 5
 
+  ti,dmic-data-pin:
+    description: |
+      The pin that carries the data of a digital (PDM) microphone. With this
+      property, the left and right ADC take their input from the digital
+      microphone. The microphone clock is ADC_MOD_CLK on a pin that
+      aic32x4-gpio-func sets to the digital microphone clock output.
+      0 - GPIO/MFP5, 1 - SCLK/MFP3, 2 - DIN/MFP1.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    enum: [0, 1, 2]
+
 required:
   - compatible
   - reg
@@ -66,6 +76,14 @@ required:
 
 allOf:
   - $ref: dai-common.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: ti,tas2505
+    then:
+      properties:
+        ti,dmic-data-pin: false
   - if:
       not:
         required:
