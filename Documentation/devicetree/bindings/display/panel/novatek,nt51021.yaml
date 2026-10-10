@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/panel/novatek,nt51021.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Novatek NT51021 based 1200x1920 DSI panels
+
+maintainers:
+  - unex <7575866+unex@users.noreply.github.com>
+
+description:
+  The Novatek NT51021 is a timing controller for 1200x1920 video mode
+  panels with four MIPI DSI data lanes. The backlight is external.
+
+allOf:
+  - $ref: panel-common.yaml#
+
+properties:
+  compatible:
+    items:
+      - enum:
+          - crestron,tswxx70-nt51021b-edt
+      - const: novatek,nt51021
+
+  reg:
+    maxItems: 1
+
+  vdd-supply:
+    description: Supply regulator for the panel logic
+
+  vccio-supply:
+    description: Supply regulator for the I/O, usually 1.8 V
+
+  reset-gpios: true
+  backlight: true
+  rotation: true
+  port: true
+
+required:
+  - compatible
+  - reg
+  - vdd-supply
+  - vccio-supply
+  - reset-gpios
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    dsi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        panel@0 {
+            compatible = "crestron,tswxx70-nt51021b-edt", "novatek,nt51021";
+            reg = <0>;
+
+            backlight = <&backlight>;
+            reset-gpios = <&tlmm 61 GPIO_ACTIVE_HIGH>;
+            vdd-supply = <&panel_vdd>;
+            vccio-supply = <&pm8953_l6>;
+
+            port {
+                panel_in: endpoint {
+                    remote-endpoint = <&dsi0_out>;
+                };
+            };
+        };
+    };
+
+...
