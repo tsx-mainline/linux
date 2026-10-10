@@ -1302,8 +1302,215 @@ static const struct hx8279_panel_desc startek_kd070fhfid078 = {
 	.src_delay_time_adj_ck = 72,
 };
 
+/*
+ * EDT 10.1" module of the Crestron TSW-1070, LCD revision 1 (downstream
+ * "hx8279d_edt_1200p_video"). The module keeps its settings in OTP: the
+ * vendor sends only "exit sleep" and "display on".
+ */
+static void crestron_tswxx70_hx8279d_edt_init_sequence(struct mipi_dsi_multi_context *dsi_ctx)
+{
+}
+
+static const struct hx8279_panel_mode crestron_tswxx70_hx8279d_edt_modes[] = {
+	{
+		.mode = {
+			.clock = (1200 + 60 + 24 + 56) * (1920 + 34 + 8 + 24) * 60 / 1000,
+			.hdisplay = 1200,
+			.hsync_start = 1200 + 60,
+			.hsync_end = 1200 + 60 + 24,
+			.htotal = 1200 + 60 + 24 + 56,
+			.vdisplay = 1920,
+			.vsync_start = 1920 + 34,
+			.vsync_end = 1920 + 34 + 8,
+			.vtotal = 1920 + 34 + 8 + 24,
+			.width_mm = 135,
+			.height_mm = 216,
+			.type = DRM_MODE_TYPE_DRIVER
+		},
+		.bpc = 8,
+		.is_video_mode = true,
+	},
+};
+
+static const struct hx8279_panel_desc crestron_tswxx70_hx8279d_edt = {
+	.dsi_info = {
+		.type = "HX8279D-EDT",
+		.channel = 0,
+		.node = NULL,
+	},
+	.mode_data = crestron_tswxx70_hx8279d_edt_modes,
+	.num_modes = ARRAY_SIZE(crestron_tswxx70_hx8279d_edt_modes),
+	.num_lanes = 4,
+
+	.init_sequence = crestron_tswxx70_hx8279d_edt_init_sequence,
+	/* Continuous clock: the vendor bootloader keeps the clock lane in HS mode. */
+	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+		      MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_LPM,
+	.reset_delay_ms = 30,
+};
+
+/*
+ * Truly 10.1" module of the Crestron TSW-1070 (downstream
+ * "hx8279d_1200p_video"). The vendor gives no size. This is the size of
+ * the EDT module.
+ */
+static void crestron_tswxx70_hx8279d_truly_init_sequence(struct mipi_dsi_multi_context *dsi_ctx)
+{
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xb2, 0x00);
+
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd0, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd1, 0x02);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd2, 0x03);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd3, 0x04);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xce, 0x05);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcd, 0x06);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcc, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcb, 0x08);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xca, 0x09);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc9, 0x0a);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc8, 0x0b);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc7, 0x0c);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc6, 0x0d);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc5, 0x0e);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc4, 0x0f);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc3, 0x10);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe4, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe5, 0x02);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe6, 0x03);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe7, 0x04);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe2, 0x05);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe1, 0x06);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe0, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdf, 0x08);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xde, 0x09);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdd, 0x0a);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdc, 0x0b);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdb, 0x0c);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xda, 0x0d);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd9, 0x0e);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd8, 0x0f);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd7, 0x10);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcf, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe3, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc0, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc1, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc2, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd4, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd5, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd6, 0x00);
+
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x03);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcc, 0x44);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc8, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc9, 0x05);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xca, 0x41);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcf, 0x60);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd2, 0x04);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd3, 0x04);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdb, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd9, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd4, 0x03);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd5, 0x02);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd6, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd7, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc3, 0x01);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc5, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xde, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe7, 0x01);
+
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x06);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xb8, 0xa5);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xbc, 0x33);
+
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xbd, 0x25);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc2, 0x19);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc4, 0x19);
+
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x02);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc0, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc1, 0x0f);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc2, 0x14);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc3, 0x23);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc4, 0x24);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc5, 0x23);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc6, 0x20);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc7, 0x1d);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc8, 0x16);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xc9, 0x0b);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xca, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcb, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcc, 0x09);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcd, 0x17);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xce, 0x1d);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xcf, 0x23);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd0, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd2, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd3, 0x0f);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd4, 0x14);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd5, 0x23);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd6, 0x24);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd7, 0x23);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd8, 0x20);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xd9, 0x1d);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xda, 0x16);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdb, 0x0b);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdc, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdd, 0x07);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xde, 0x09);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xdf, 0x17);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe0, 0x1d);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe1, 0x23);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xe2, 0x07);
+
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, HX8279_REG_PAGE, 0x00);
+	mipi_dsi_generic_write_seq_multi(dsi_ctx, 0xb2, 0x40);
+}
+
+static const struct hx8279_panel_mode crestron_tswxx70_hx8279d_truly_modes[] = {
+	{
+		.mode = {
+			.clock = (1200 + 80 + 24 + 36) * (1920 + 50 + 2 + 18) * 60 / 1000,
+			.hdisplay = 1200,
+			.hsync_start = 1200 + 80,
+			.hsync_end = 1200 + 80 + 24,
+			.htotal = 1200 + 80 + 24 + 36,
+			.vdisplay = 1920,
+			.vsync_start = 1920 + 50,
+			.vsync_end = 1920 + 50 + 2,
+			.vtotal = 1920 + 50 + 2 + 18,
+			.width_mm = 135,
+			.height_mm = 216,
+			.type = DRM_MODE_TYPE_DRIVER
+		},
+		.bpc = 8,
+		.is_video_mode = true,
+	},
+};
+
+static const struct hx8279_panel_desc crestron_tswxx70_hx8279d_truly = {
+	.dsi_info = {
+		.type = "HX8279D-TRULY",
+		.channel = 0,
+		.node = NULL,
+	},
+	.mode_data = crestron_tswxx70_hx8279d_truly_modes,
+	.num_modes = ARRAY_SIZE(crestron_tswxx70_hx8279d_truly_modes),
+	.num_lanes = 4,
+
+	.init_sequence = crestron_tswxx70_hx8279d_truly_init_sequence,
+	/* Continuous clock: the vendor bootloader keeps the clock lane in HS mode. */
+	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
+		      MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_LPM,
+	.reset_delay_ms = 20,
+};
+
 static const struct of_device_id hx8279_of_match[] = {
 	{ .compatible = "aoly,sl101pm1794fog-v15", .data = &aoly_sl101pm1794fog_v15 },
+	{ .compatible = "crestron,tswxx70-hx8279d-edt", .data = &crestron_tswxx70_hx8279d_edt },
+	{ .compatible = "crestron,tswxx70-hx8279d-truly", .data = &crestron_tswxx70_hx8279d_truly },
 	{ .compatible = "startek,kd070fhfid078", .data = &startek_kd070fhfid078 },
 	{ /* sentinel */ }
 };
