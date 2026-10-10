@@ -17,7 +17,9 @@ properties:
     items:
       - enum:
           - chongzhou,cz101b4001
+          - crestron,tswxx70-jd9365da-truly
           - crestron,tswxx70-jd9366-edt
+          - crestron,tswxx70-jd9366ab3-edt
           - kingdisplay,kd101ne3-40ti
           - melfas,lmfbx101117480
           - radxa,display-10hd-ad001
