@@ -238,6 +238,19 @@ struct hx8279_panel_desc {
 
 	/* Page 7..12 */
 	const struct hx8279_digital_gamma *dgamma;
+
+	/*
+	 * Optional, for modules with a vendor init sequence that does not
+	 * fit the register model above: the driver sends this sequence
+	 * instead of the register model.
+	 */
+	void (*init_sequence)(struct mipi_dsi_multi_context *dsi_ctx);
+
+	/* Optional DSI mode flags, replace the default flags */
+	unsigned long mode_flags;
+
+	/* Optional time from the reset release to the first command */
+	unsigned int reset_delay_ms;
 };
 
 static inline struct hx8279 *to_hx8279(struct drm_panel *panel)
@@ -622,6 +635,11 @@ static int hx8279_on(struct hx8279 *hx)
 	struct mipi_dsi_device *dsi = hx->dsi[0];
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
 
+	if (hx->desc->init_sequence) {
+		hx->desc->init_sequence(&dsi_ctx);
+		return dsi_ctx.accum_err;
+	}
+
 	/* Page 5 */
 	hx8279_set_mipi_cfg(hx, &dsi_ctx);
 
@@ -691,7 +709,10 @@ static int hx8279_prepare(struct drm_panel *panel)
 	gpiod_set_value_cansleep(hx->enable_gpio, 1);
 	usleep_range(5000, 6000);
 	gpiod_set_value_cansleep(hx->reset_gpio, 1);
-	usleep_range(6000, 7000);
+	if (hx->desc->reset_delay_ms)
+		msleep(hx->desc->reset_delay_ms);
+	else
+		usleep_range(6000, 7000);
 
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 	if (hx->dsi[1])
@@ -1072,12 +1093,16 @@ static int hx8279_probe(struct mipi_dsi_device *dsi)
 		hx->dsi[i]->lanes = hx->desc->num_lanes;
 		hx->dsi[i]->format = MIPI_DSI_FMT_RGB888;
 
-		hx->dsi[i]->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS |
-					 MIPI_DSI_MODE_LPM;
+		if (hx->desc->mode_flags) {
+			hx->dsi[i]->mode_flags = hx->desc->mode_flags;
+		} else {
+			hx->dsi[i]->mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS |
+						 MIPI_DSI_MODE_LPM;
 
-		if (hx->desc->mode_data[0].is_video_mode)
-			hx->dsi[i]->mode_flags |= MIPI_DSI_MODE_VIDEO |
-						  MIPI_DSI_MODE_VIDEO_SYNC_PULSE;
+			if (hx->desc->mode_data[0].is_video_mode)
+				hx->dsi[i]->mode_flags |= MIPI_DSI_MODE_VIDEO |
+							  MIPI_DSI_MODE_VIDEO_SYNC_PULSE;
+		}
 
 		ret = devm_mipi_dsi_attach(dev, hx->dsi[i]);
 		if (ret < 0) {
