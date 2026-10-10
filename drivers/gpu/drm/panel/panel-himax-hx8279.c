@@ -1084,6 +1084,9 @@ static int hx8279_probe(struct mipi_dsi_device *dsi)
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to get backlight\n");
 
+	/* prepare() sends the init commands, so the DSI host must be on first */
+	hx->panel.prepare_prev_first = true;
+
 	drm_panel_add(&hx->panel);
 
 	for (i = 0; i < 2; i++) {
