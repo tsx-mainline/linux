@@ -196,6 +196,11 @@ int aic32x4_register_clocks(struct device *dev, const char *mclk_name);
 /* AIC32X4_ADCSETUP */
 #define AIC32X4_LADC_EN			BIT(7)
 #define AIC32X4_RADC_EN			BIT(6)
+#define AIC32X4_DMIC_PIN_MASK		GENMASK(5, 4)
+#define AIC32X4_DMIC_PIN_SHIFT		4
+#define AIC32X4_LDMIC_EN_SHIFT		3
+#define AIC32X4_RDMIC_EN_SHIFT		2
+#define AIC32X4_DMIC_EN_MASK		GENMASK(3, 2)
 
 /* AIC32X4_PWRCFG */
 #define AIC32X4_AVDDWEAKDISABLE		BIT(3)

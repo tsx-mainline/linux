@@ -31,6 +31,13 @@
 
 #define AIC32X4_MFP_GPIO_ENABLED	0x4
 
+#define AIC32X4_MFP4_DMIC_CLK		0xe
+
+/* Pin with the digital microphone data, values of "ti,dmic-data-pin" */
+#define AIC32X4_DMIC_DATA_MFP5		0
+#define AIC32X4_DMIC_DATA_MFP3		1
+#define AIC32X4_DMIC_DATA_MFP1		2
+
 #define AIC32X4_MFP5_GPIO_DISABLED	0x0
 #define AIC32X4_MFP5_GPIO_INPUT		0x8
 #define AIC32X4_MFP5_GPIO_OUTPUT	0xc

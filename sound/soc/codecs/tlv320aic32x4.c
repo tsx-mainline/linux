@@ -49,6 +49,9 @@ struct aic32x4_priv {
 	struct device *dev;
 	enum aic32x4_type type;
 
+	bool has_dmic;
+	u32 dmic_pin;
+
 	unsigned int fmt;
 };
 
@@ -475,6 +478,33 @@ static const struct snd_soc_dapm_widget aic32x4_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("IN3_R"),
 	SND_SOC_DAPM_INPUT("CM_L"),
 	SND_SOC_DAPM_INPUT("CM_R"),
+};
+
+/*
+ * Digital microphone input. ADCSETUP selects the data pin and connects each
+ * ADC channel to the digital microphone instead of the analog MicPGA path.
+ * The microphone clock is ADC_MOD_CLK (AOSR x fs) on the MFP pin that
+ * aic32x4-gpio-func sets to the digital microphone clock output.
+ */
+static const struct snd_kcontrol_new aic32x4_left_dmic_switch =
+	SOC_DAPM_SINGLE("Switch", AIC32X4_ADCSETUP, AIC32X4_LDMIC_EN_SHIFT, 1, 0);
+
+static const struct snd_kcontrol_new aic32x4_right_dmic_switch =
+	SOC_DAPM_SINGLE("Switch", AIC32X4_ADCSETUP, AIC32X4_RDMIC_EN_SHIFT, 1, 0);
+
+static const struct snd_soc_dapm_widget aic32x4_dmic_dapm_widgets[] = {
+	SND_SOC_DAPM_SWITCH("Left DMIC", SND_SOC_NOPM, 0, 0,
+			    &aic32x4_left_dmic_switch),
+	SND_SOC_DAPM_SWITCH("Right DMIC", SND_SOC_NOPM, 0, 0,
+			    &aic32x4_right_dmic_switch),
+	SND_SOC_DAPM_INPUT("DMIC"),
+};
+
+static const struct snd_soc_dapm_route aic32x4_dmic_dapm_routes[] = {
+	{"Left DMIC", "Switch", "DMIC"},
+	{"Left ADC", NULL, "Left DMIC"},
+	{"Right DMIC", "Switch", "DMIC"},
+	{"Right ADC", NULL, "Right DMIC"},
 };
 
 static const struct snd_soc_dapm_route aic32x4_dapm_routes[] = {
@@ -998,6 +1028,27 @@ static void aic32x4_setup_gpios(struct snd_soc_component *component)
 	}
 }
 
+static int aic32x4_add_dmic(struct snd_soc_component *component)
+{
+	struct snd_soc_dapm_context *dapm = snd_soc_component_get_dapm(component);
+	struct aic32x4_priv *aic32x4 = snd_soc_component_get_drvdata(component);
+	int ret;
+
+	/* Both ADC channels take the digital microphone by default. */
+	snd_soc_component_update_bits(component, AIC32X4_ADCSETUP,
+				      AIC32X4_DMIC_PIN_MASK | AIC32X4_DMIC_EN_MASK,
+				      (aic32x4->dmic_pin << AIC32X4_DMIC_PIN_SHIFT) |
+				      AIC32X4_DMIC_EN_MASK);
+
+	ret = snd_soc_dapm_new_controls(dapm, aic32x4_dmic_dapm_widgets,
+					ARRAY_SIZE(aic32x4_dmic_dapm_widgets));
+	if (ret)
+		return ret;
+
+	return snd_soc_dapm_add_routes(dapm, aic32x4_dmic_dapm_routes,
+				       ARRAY_SIZE(aic32x4_dmic_dapm_routes));
+}
+
 static int aic32x4_component_probe(struct snd_soc_component *component)
 {
 	struct aic32x4_priv *aic32x4 = snd_soc_component_get_drvdata(component);
@@ -1053,6 +1104,12 @@ static int aic32x4_component_probe(struct snd_soc_component *component)
 	else
 		snd_soc_component_write(component, AIC32X4_RMICPGANIN,
 				AIC32X4_RMICPGANIN_CM1R_10K);
+
+	if (aic32x4->has_dmic) {
+		ret = aic32x4_add_dmic(component);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * Workaround: for an unknown reason, the ADC needs to be powered up
@@ -1250,6 +1307,15 @@ static int aic32x4_parse_dt(struct aic32x4_priv *aic32x4,
 	if (of_property_read_u32_array(np, "aic32x4-gpio-func",
 				aic32x4_setup->gpio_func, 5) >= 0)
 		aic32x4->setup = aic32x4_setup;
+
+	if (!of_property_read_u32(np, "ti,dmic-data-pin", &aic32x4->dmic_pin)) {
+		if (aic32x4->dmic_pin > AIC32X4_DMIC_DATA_MFP1) {
+			dev_err(aic32x4->dev, "Invalid ti,dmic-data-pin %u\n",
+				aic32x4->dmic_pin);
+			return -EINVAL;
+		}
+		aic32x4->has_dmic = true;
+	}
 	return 0;
 }
 
