@@ -1,0 +1,46 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Crestron TSW-1070 and TSS-1070 (the same board): 10" EDT NT51021B
+ * 1200x1920 panel, mounted landscape. Stock bootloader SKU 18.
+ */
+/dts-v1/;
+
+#include "apq8053-crestron-tswxx70.dtsi"
+
+/ {
+	model = "Crestron TSW-1070";
+	compatible = "crestron,tsw1070", "crestron,tswxx70", "qcom,apq8053", "qcom,msm8953";
+
+	/*
+	 * All TSW-xx70 boards report the same board ID. lk2nd selects this
+	 * DTB with subtype 18 (the stock SKU) when the stock bootloader
+	 * reports the NT51021B panel.
+	 */
+	qcom,board-id = <QCOM_BOARD_ID_QRD 18>;
+};
+
+&gpu_zap_shader {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/a506_zap.mbn";
+};
+
+&lpass {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/adsp.mbn";
+};
+
+&panel {
+	compatible = "crestron,tswxx70-nt51021b-edt", "novatek,nt51021";
+};
+
+&touchscreen {
+	/* The controller is configured for the landscape mounting. */
+	touchscreen-size-x = <1792>;
+	touchscreen-size-y = <1024>;
+};
+
+&wcnss {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/wcnss.mbn";
+};
+
+&wcnss_ctrl {
+	firmware-name = "qcom/apq8053/crestron/tswxx70/WCNSS_qcom_wlan_nv.bin";
+};
