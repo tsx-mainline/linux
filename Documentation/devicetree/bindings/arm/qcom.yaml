@@ -234,6 +234,7 @@ properties:
 
       - items:
           - enum:
+              - crestron,tsw1070
               - crestron,tsw770
           - const: crestron,tswxx70
           - const: qcom,apq8053
