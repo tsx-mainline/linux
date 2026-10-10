@@ -179,9 +179,12 @@ static const struct nt51021_panel_desc crestron_tswxx70_nt51021b_desc = {
 	},
 	.lanes = 4,
 	.format = MIPI_DSI_FMT_RGB888,
+	/*
+	 * The panel needs a continuous HS clock: with the clock lane in LP
+	 * during blanking, the picture shifts sideways every few seconds.
+	 */
 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
-		      MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_CLOCK_NON_CONTINUOUS |
-		      MIPI_DSI_MODE_LPM,
+		      MIPI_DSI_MODE_NO_EOT_PACKET | MIPI_DSI_MODE_LPM,
 	.init = crestron_tswxx70_nt51021b_init,
 	.reset_ms = { 30, 20, 30 },
 };
