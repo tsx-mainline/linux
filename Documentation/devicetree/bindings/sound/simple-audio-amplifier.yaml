@@ -21,6 +21,13 @@ properties:
   enable-gpios:
     maxItems: 1
 
+  enable-delay-ms:
+    description: >
+      Time to wait after the inputs of the amplifier power up, before the
+      enable GPIO turns the amplifier on. The output of the source can need
+      this time to settle. An amplifier that turns on during the step makes
+      a pop.
+
   VCC-supply:
     description: >
       power supply for the device
@@ -40,6 +47,7 @@ examples:
         compatible = "simple-audio-amplifier";
         VCC-supply = <&regulator>;
         enable-gpios = <&gpio GPIOH_3 0>;
+        enable-delay-ms = <100>;
     };
 
 ...
