@@ -208,13 +208,11 @@
 	 * on (DECODED). DAPM turns it on only while a stream plays, as the
 	 * vendor does (TESTED: high during a stream, low 5 s after it).
 	 * TESTED without a listener: the card plays at 8, 16, 44.1 and
-	 * 48 kHz at the correct speed. A check that the speaker gives clean
-	 * sound is pending.
+	 * 48 kHz at the correct speed. The pad of the enable GPIO is in the
+	 * hog group, so the amplifier is off from early boot.
 	 */
 	speaker_amp: audio-amplifier {
 		compatible = "simple-audio-amplifier";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_amp>;
 		enable-gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;
 		sound-name-prefix = "Speaker Amp";
 	};
@@ -350,12 +348,14 @@
 			MX53_PAD_PATA_DATA7__GPIO2_7		0x80000000
 			/* Probably the PHY interrupt, not used (LIKELY) */
 			MX53_PAD_PATA_DATA4__GPIO2_4		0x80000000
-		>;
-	};
-
-	pinctrl_amp: ampgrp {
-		fsl,pins = <
-			MX53_PAD_GPIO_4__GPIO1_4		0x80000000
+			/*
+			 * Speaker amplifier enable. The reset value of the pad
+			 * is a 100k pull-up (0x1e4), so the amplifier is on
+			 * until its driver loads, also while the codec probes.
+			 * A 360k pull-down (0x1c4) turns it off when the
+			 * pin controller probes.
+			 */
+			MX53_PAD_GPIO_4__GPIO1_4		0x1c4
 		>;
 	};
 
