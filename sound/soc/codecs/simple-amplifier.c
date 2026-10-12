@@ -4,8 +4,10 @@
  * Author: Jerome Brunet <jbrunet@baylibre.com>
  */
 
+#include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
+#include <linux/property.h>
 #include <linux/regulator/consumer.h>
 #include <sound/soc.h>
 
@@ -13,6 +15,7 @@
 
 struct simple_amp {
 	struct gpio_desc *gpiod_enable;
+	u32 enable_delay_ms;
 };
 
 static int drv_event(struct snd_soc_dapm_widget *w,
@@ -24,6 +27,13 @@ static int drv_event(struct snd_soc_dapm_widget *w,
 
 	switch (event) {
 	case SND_SOC_DAPM_POST_PMU:
+		/*
+		 * The source of the amplifier input powered up just before
+		 * this event. Let its output settle before the amplifier
+		 * turns on, or the step can make a pop.
+		 */
+		if (priv->gpiod_enable && priv->enable_delay_ms)
+			msleep(priv->enable_delay_ms);
 		val = 1;
 		break;
 	case SND_SOC_DAPM_PRE_PMD:
@@ -80,6 +90,8 @@ static int simple_amp_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->gpiod_enable))
 		return dev_err_probe(dev, PTR_ERR(priv->gpiod_enable),
 				     "Failed to get 'enable' gpio");
+
+	device_property_read_u32(dev, "enable-delay-ms", &priv->enable_delay_ms);
 
 	return devm_snd_soc_register_component(dev,
 					       &simple_amp_component_driver,
