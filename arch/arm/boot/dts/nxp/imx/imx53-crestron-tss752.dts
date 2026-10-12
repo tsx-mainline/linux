@@ -208,12 +208,20 @@
 	 * on (DECODED). DAPM turns it on only while a stream plays, as the
 	 * vendor does (TESTED: high during a stream, low 5 s after it).
 	 * TESTED without a listener: the card plays at 8, 16, 44.1 and
-	 * 48 kHz at the correct speed. The pad of the enable GPIO is in the
-	 * hog group, so the amplifier is off from early boot.
+	 * 48 kHz at the correct speed.
+	 *
+	 * The line outputs power up just before the amplifier. With no time
+	 * between the two, the speaker pops at each power up (TESTED with the
+	 * panel microphone, the part above 1 kHz: -43 dBFS peaks). With
+	 * 100 ms between them, only a small click of the amplifier itself
+	 * stays (about -63 dBFS, 20 dB less). A longer time gives no less.
+	 * The pad of the enable GPIO is in the hog group, so the amplifier is
+	 * off from early boot.
 	 */
 	speaker_amp: audio-amplifier {
 		compatible = "simple-audio-amplifier";
 		enable-gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;
+		enable-delay-ms = <100>;
 		sound-name-prefix = "Speaker Amp";
 	};
 
