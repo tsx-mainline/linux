@@ -1,0 +1,44 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Crestron UC-P8 room phone: 800x1280 MIPI-DSI panel with an ILI9881C
+ * controller ("gxh" in the stock firmware).
+ *
+ * NOT TESTED ON HARDWARE. This file comes from the stock UC-P10/P8 device
+ * tree and from the UC-P10 board file. The UC-P8 and the UC-P10 share the
+ * stock firmware and its device tree. The only differences in that tree
+ * are the panel (selected by the LCD ID) and the order of the touch keys.
+ * The panel rotation, the backlight and the touch coordinates are the
+ * UC-P10 values and are not checked on a UC-P8.
+ */
+
+/dts-v1/;
+
+#include "rk3399-crestron-uc-pxx.dtsi"
+
+/ {
+	model = "Crestron UC-P8";
+	compatible = "crestron,uc-p8", "rockchip,rk3399";
+};
+
+&panel {
+	compatible = "crestron,uc-p8-gxh-panel", "ilitek,ili9881c";
+};
+
+&sound {
+	label = "UC-P8";
+};
+
+&touchscreen {
+	/* T15 key order: the stock "linux,gpio-keymap" (not the _p10 map) */
+	linux,keycodes = <KEY_PROG1 KEY_PROG2 KEY_PROG3
+			  KEY_VOLUMEDOWN KEY_VOLUMEUP KEY_MUTE>;
+};
+
+&vopb {
+	/*
+	 * VPLL at 1188 MHz, so that the integer divider gives exactly the
+	 * 66 MHz pixel clock of the panel (VPLL/18).
+	 */
+	assigned-clock-rates = <0>, <0>,
+			       <1188000000>, <400000000>, <100000000>;
+};

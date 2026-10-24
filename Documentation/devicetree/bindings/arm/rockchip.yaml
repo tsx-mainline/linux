@@ -145,6 +145,7 @@ properties:
         items:
           - enum:
               - crestron,uc-p10
+              - crestron,uc-p8
           - const: rockchip,rk3399
 
       - description: Edgeble Neural Compute Module 2(Neu2) SoM based boards
