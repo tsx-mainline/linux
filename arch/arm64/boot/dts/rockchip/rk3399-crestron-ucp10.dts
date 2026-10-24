@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Crestron UC-P10 room phone: 1200x1920 MIPI-DSI panel with a Himax
+ * HX8279-family controller.
+ */
+
+/dts-v1/;
+
+#include "rk3399-crestron-uc-pxx.dtsi"
+
+/ {
+	model = "Crestron UC-P10";
+	compatible = "crestron,uc-p10", "rockchip,rk3399";
+};
+
+&panel {
+	compatible = "crestron,uc-p10-himax-panel";
+};
+
+&sound {
+	label = "UC-P10";
+};
+
+&touchscreen {
+	/*
+	 * T15 key array: CTRL 0x03, 6x1 at X35/Y22. T19 (GPIO) and T97 are
+	 * disabled in the chip configuration. The key order is the stock
+	 * "linux,gpio-keymap_p10". The coordinates (X 0..1919, Y 0..1199)
+	 * already match the upright landscape UI. The chip T100 object has
+	 * INVERTX and INVERTY set, and stock Android uses the values as they
+	 * are with ro.sf.hwrotation=270. So no swap or invert is necessary.
+	 */
+	linux,keycodes = <KEY_MUTE KEY_VOLUMEUP KEY_VOLUMEDOWN
+			  KEY_PROG3 KEY_PROG2 KEY_PROG1>;
+};

@@ -182,6 +182,12 @@ properties:
           - const: alientek,clrv1126f
           - const: rockchip,rv1126
 
+      - description: Crestron UC-Pxx room phones
+        items:
+          - enum:
+              - crestron,uc-p10
+          - const: rockchip,rk3399
+
       - description: Edgeble Neural Compute Module 2(Neu2) SoM based boards
         items:
           - const: edgeble,neural-compute-module-2-io   # Edgeble Neural Compute Module 2 IO Board

@@ -1,0 +1,1230 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Common device tree for the Crestron UC-Pxx room phones (RK3399).
+ *
+ * The UC-P10 and the UC-P8 use the same board. They differ in the DSI panel
+ * and in the order of the touch keys. The board file sets the model, the
+ * panel compatible, the touch key codes and the sound card name.
+ *
+ * The display path is VOPB -> MIPI DSI0 -> panel, with a pwm0 backlight.
+ * rockchip-drm owns the display after the kernel starts. There is no
+ * simple-framebuffer.
+ *
+ * The memory banks avoid the OP-TEE secure carve-out at
+ * 0x08400000..0x0a200000. The boot shim gives this DTB to the kernel, so
+ * /chosen/bootargs is the kernel command line.
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include "rk3399.dtsi"
+
+/ {
+	aliases {
+		ethernet0 = &gmac;
+		mmc0 = &sdhci;
+		serial2 = &uart2;
+	};
+
+	chosen {
+		stdout-path = "serial2:115200n8";
+		bootargs = "console=ttyS2,115200n8 earlycon=uart8250,mmio32,0xff1a0000 loglevel=7 clk_ignore_unused pd_ignore_unused fbcon=rotate:3 initramfs_async=0 panic=30 rdinit=/init";
+	};
+
+	memory@200000 {
+		device_type = "memory";
+		reg = <0x0 0x00200000 0x0 0x08200000>,
+		      <0x0 0x0a200000 0x0 0xede00000>;
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * 64 MiB contiguous pool for rockchip-drm scanout. The VOP runs
+		 * without its IOMMU (iommus deleted below), so framebuffers must
+		 * be physically contiguous; rockchip-drm uses dma_alloc (CMA) and
+		 * programs the real physical address into WIN0_YRGB_MST.
+		 * Placed in the upper memory bank, clear of the kernel load area
+		 * (0x4000000) and OP-TEE (0x8400000..0xa200000).
+		 */
+		cma_reserved: linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			linux,cma-default;
+			size = <0x0 0x04000000>;
+			alloc-ranges = <0x0 0x0a200000 0x0 0x40000000>;
+		};
+	};
+
+	firmware {
+		optee {
+			compatible = "linaro,optee-tz";
+			method = "smc";
+			/* stock OP-TEE predates the mainline SMC ABI: probe fails -2 */
+			status = "disabled";
+		};
+	};
+
+	/*
+	 * Stock "vcc_phy" (supply of the RTL8364B switch / gmac phy-supply):
+	 * a fixed, always-on rail with no enable GPIO in the stock DT.
+	 */
+	vcc_phy: regulator-vcc-phy {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_phy";
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc3v3_sys>;
+	};
+
+	/*
+	 * USB-C VBUS source switch (stock fusb302 "vbus-5v-gpios" = GPIO4_D2,
+	 * active high). Off at boot; only TCPM turns it on, when the port is a
+	 * source (host role, e.g. an OTG adapter with Rd).
+	 */
+	vbus_typec: regulator-vbus-typec {
+		compatible = "regulator-fixed";
+		regulator-name = "vbus_typec";
+		enable-active-high;
+		gpio = <&gpio4 RK_PD2 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vbus_typec_en>;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc3v3_sys: regulator-vcc3v3-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+
+	vcc5v0_sys: regulator-vcc5v0-sys {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_sys";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+	};
+
+	/*
+	 * Speaker amplifier PVDD/boost enable (stock "vcc_sound_en": GPIO4_C6,
+	 * enable-active-high, boot-on, always-on).
+	 */
+	vcc_sound_en: regulator-vcc-sound-en {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_sound_en";
+		enable-active-high;
+		gpio = <&gpio4 RK_PC6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&sound_en>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* AP6256 Wi-Fi: WL_REG_ON = GPIO0_B2, 32 kHz LPO = RK808 clkout2 */
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&rk808 1>;
+		clock-names = "ext_clock";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_enable_h>;
+		reset-gpios = <&gpio0 RK_PB2 GPIO_ACTIVE_LOW>;
+	};
+
+	/*
+	 * Front-panel switches (stock gpio-keys, EV_SW, active low, 100 ms
+	 * debounce): privacy camera shutter, handset hook, PIR presence.
+	 */
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&switches>;
+
+		switch-camera {
+			label = "Camera Switch";
+			gpios = <&gpio2 RK_PB2 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_CAMERA_LENS_COVER>;
+			debounce-interval = <100>;
+		};
+
+		switch-hook {
+			label = "Hook Switch";
+			gpios = <&gpio4 RK_PD0 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_DOCK>;
+			debounce-interval = <100>;
+		};
+
+		switch-pir {
+			label = "PIR Detector";
+			gpios = <&gpio1 RK_PA7 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_FRONT_PROXIMITY>;
+			debounce-interval = <100>;
+		};
+	};
+
+	/* Stock gpio-leds (names kept; all default off as in stock) */
+	leds {
+		compatible = "gpio-leds";
+		pinctrl-names = "default";
+		pinctrl-0 = <&led_pins>;
+
+		led-green {
+			label = "green";
+			gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-red {
+			label = "red";
+			gpios = <&gpio1 RK_PA1 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-blue {
+			label = "blue";
+			gpios = <&gpio0 RK_PB3 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-mute-speaker {
+			label = "mute_speaker";
+			gpios = <&gpio4 RK_PD5 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-mute-headset {
+			label = "mute_headset";
+			gpios = <&gpio4 RK_PD6 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-mute-red {
+			label = "mute_red";
+			gpios = <&gpio4 RK_PD4 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
+		led-teams-white {
+			label = "teams_white";
+			gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+
+	/*
+	 * Main sound card. I2S0 (master, mclk 256 fs, 4 channel playback)
+	 * feeds two codecs on one link, as the stock "grandstream-audio" card
+	 * does: the TAS5825M speaker amplifier and the TLV320AIC3104
+	 * handset and headset codec. Playback channels 1-2 go to I2S0 SDO0,
+	 * channels 3-4 to SDO1. The board file sets the card name (label).
+	 */
+	sound: sound {
+		compatible = "audio-graph-card2";
+		links = <&i2s0_port>;
+
+		multi {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			ports@0 {
+				reg = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+					mcodec0_ep: endpoint {
+						remote-endpoint = <&i2s0_ep>;
+					};
+				};
+
+				port@1 {
+					reg = <1>;
+					mcodec1_ep: endpoint {
+						remote-endpoint = <&tas5825m_ep>;
+					};
+				};
+
+				port@2 {
+					reg = <2>;
+					mcodec2_ep: endpoint {
+						remote-endpoint = <&aic3104_ep>;
+					};
+				};
+			};
+		};
+	};
+
+	/* Bluetooth SCO PCM on I2S1 (stock "rockchip,bt" card) */
+	bt_sco: bt-sco {
+		compatible = "delta,dfbmcs320";
+		#sound-dai-cells = <0>;
+	};
+
+	bt-sound {
+		compatible = "simple-audio-card";
+		simple-audio-card,name = "rockchip,bt";
+		simple-audio-card,format = "dsp_b";
+		simple-audio-card,bitclock-inversion;
+		simple-audio-card,mclk-fs = <256>;
+
+		simple-audio-card,cpu {
+			sound-dai = <&i2s1>;
+		};
+
+		simple-audio-card,codec {
+			sound-dai = <&bt_sco>;
+		};
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm0 0 20000 0>;
+		brightness-levels = <0 128 192 224 255>;
+		default-brightness-level = <4>;
+	};
+};
+
+/*
+ * i2c0: RK808 PMIC + the two Silergy SYR82x DC/DC (big-cluster and GPU
+ * rails). Every regulator is described exactly as in the stock 1.0.6.20
+ * kernel DT (voltages, always-on/boot-on, ramp delays, suspend states).
+ * Regulators the stock DT leaves undescribed (RK808 LDO_REG1, LDO_REG2,
+ * SWITCH_REG1) stay undescribed, so the kernel never touches them.
+ * The panel power supply is vcc3v3_lcd2 (SWITCH_REG2).
+ */
+&i2c0 {
+	clock-frequency = <400000>;
+	i2c-scl-rising-time-ns = <180>;
+	i2c-scl-falling-time-ns = <30>;
+	status = "okay";
+
+	rk808: pmic@1b {
+		compatible = "rockchip,rk808";
+		reg = <0x1b>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PC6 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pmic_int_l>;
+		#clock-cells = <1>;
+		clock-output-names = "rk808-clkout1", "wifibt_32kin";
+		system-power-controller;
+		wakeup-source;
+
+		vcc1-supply = <&vcc3v3_sys>;
+		vcc2-supply = <&vcc3v3_sys>;
+		vcc3-supply = <&vcc3v3_sys>;
+		vcc4-supply = <&vcc3v3_sys>;
+		vcc6-supply = <&vcc3v3_sys>;
+		vcc7-supply = <&vcc3v3_sys>;
+		vcc8-supply = <&vcc3v3_sys>;
+		vcc9-supply = <&vcc3v3_sys>;
+		vcc10-supply = <&vcc3v3_sys>;
+		vcc11-supply = <&vcc3v3_sys>;
+		vcc12-supply = <&vcc3v3_sys>;
+
+		regulators {
+			vdd_center: DCDC_REG1 {
+				regulator-name = "vdd_center";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <750000>;
+				regulator-max-microvolt = <1350000>;
+				regulator-ramp-delay = <6001>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-max-microvolt = <1000000>;
+				};
+			};
+
+			vdd_cpu_l: DCDC_REG2 {
+				regulator-name = "vdd_cpu_l";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <750000>;
+				regulator-max-microvolt = <1350000>;
+				regulator-ramp-delay = <6001>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-max-microvolt = <1000000>;
+				};
+			};
+
+			vcc_ddr: DCDC_REG3 {
+				regulator-name = "vcc_ddr";
+				regulator-always-on;
+				regulator-boot-on;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+				};
+			};
+
+			vcc_1v8: DCDC_REG4 {
+				regulator-name = "vcc_1v8";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <1800000>;
+				};
+			};
+
+			vcc1v8_pmupll: LDO_REG3 {
+				regulator-name = "vcc1v8_pmupll";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <1800000>;
+				};
+			};
+
+			vcc_3v0: LDO_REG4 {
+				regulator-name = "vcc_3v0";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <3000000>;
+				};
+			};
+
+			vcc2v8_cam: LDO_REG5 {
+				regulator-name = "vcc2v8_cam";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <2800000>;
+				};
+			};
+
+			vcc_1v5: LDO_REG6 {
+				regulator-name = "vcc_1v5";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <1500000>;
+				regulator-max-microvolt = <1500000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <1500000>;
+				};
+			};
+
+			vcc_1v8mic: LDO_REG7 {
+				regulator-name = "vcc_1v8mic";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <1800000>;
+				};
+			};
+
+			vcc1v8_cam: LDO_REG8 {
+				regulator-name = "vcc1v8_cam";
+				regulator-always-on;
+				regulator-boot-on;
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+
+				regulator-state-mem {
+					regulator-on-in-suspend;
+					regulator-suspend-microvolt = <1800000>;
+				};
+			};
+
+			/*
+			 * Panel 3.3 V. Not always-on in stock: the DSI panel is
+			 * its only consumer and enables it in prepare().
+			 */
+			vcc3v3_lcd2: SWITCH_REG2 {
+				regulator-name = "vcc3v3_lcd2";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+				regulator-ramp-delay = <500000>;
+
+				regulator-state-mem {
+					regulator-off-in-suspend;
+				};
+			};
+		};
+	};
+
+	/* Big-cluster (A72) rail. VSEL pin held low -> VSEL0 = runtime. */
+	vdd_cpu_b: regulator@40 {
+		compatible = "silergy,syr827";
+		reg = <0x40>;
+		fcs,suspend-voltage-selector = <1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vsel1_pin>;
+		vsel-gpios = <&gpio1 RK_PC1 GPIO_ACTIVE_HIGH>;
+		regulator-name = "vdd_cpu_b";
+		regulator-min-microvolt = <712500>;
+		regulator-max-microvolt = <1500000>;
+		regulator-ramp-delay = <1000>;
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc3v3_sys>;
+
+		regulator-state-mem {
+			regulator-off-in-suspend;
+		};
+	};
+
+	/* GPU rail. VSEL pin held low -> VSEL0 = runtime. */
+	vdd_gpu: regulator@41 {
+		compatible = "silergy,syr828";
+		reg = <0x41>;
+		fcs,suspend-voltage-selector = <1>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vsel2_pin>;
+		vsel-gpios = <&gpio1 RK_PB6 GPIO_ACTIVE_HIGH>;
+		regulator-name = "vdd_gpu";
+		regulator-min-microvolt = <712500>;
+		regulator-max-microvolt = <1500000>;
+		regulator-ramp-delay = <1000>;
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc3v3_sys>;
+
+		regulator-state-mem {
+			regulator-off-in-suspend;
+		};
+	};
+};
+
+/* i2c1: speaker amplifier + handset/headset codec (stock timings) */
+&i2c1 {
+	i2c-scl-rising-time-ns = <164>;
+	i2c-scl-falling-time-ns = <15>;
+	status = "okay";
+
+	aic3104: audio-codec@18 {
+		compatible = "ti,tlv320aic3104";
+		reg = <0x18>;
+		#sound-dai-cells = <0>;
+		clocks = <&cru SCLK_I2S_8CH_OUT>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aic3104_pins>;
+		reset-gpios = <&gpio2 RK_PA3 GPIO_ACTIVE_LOW>;
+		ai3x-micbias-vg = <2>;		/* 2.5 V, as stock */
+		AVDD-supply = <&vcc3v3_sys>;
+		DRVDD-supply = <&vcc3v3_sys>;
+		IOVDD-supply = <&vcc_1v8>;
+		DVDD-supply = <&vcc_1v8>;
+
+		port {
+			aic3104_ep: endpoint {
+				remote-endpoint = <&mcodec2_ep>;
+				/* MCLK pin: the card enables it and sets 256 fs */
+				clocks = <&cru SCLK_I2S_8CH_OUT>;
+				mclk-fs = <256>;
+			};
+		};
+	};
+
+	tas5825m: amplifier@4d {
+		compatible = "ti,tas5825m";
+		reg = <0x4d>;
+		#sound-dai-cells = <0>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&tas5825m_pins>;
+		pdn-gpios = <&gpio0 RK_PA7 GPIO_ACTIVE_LOW>;
+		mute-gpios = <&gpio2 RK_PB1 GPIO_ACTIVE_LOW>;
+		pvdd-supply = <&vcc_sound_en>;
+		ti,dsp-config-name = "ucp10";
+		sound-name-prefix = "Speaker";
+
+		port {
+			tas5825m_ep: endpoint {
+				remote-endpoint = <&mcodec1_ep>;
+			};
+		};
+	};
+};
+
+/*
+ * i2c2: OV2735 2-lane MIPI camera on ISP0. Disabled: on the tested UC-P10
+ * the sensor does not answer (the stock probe also fails with -ENXIO at
+ * 0x3c).
+ */
+&i2c2 {
+	clock-frequency = <400000>;
+	i2c-scl-rising-time-ns = <200>;
+	i2c-scl-falling-time-ns = <115>;
+	status = "disabled";
+
+	camera@3c {
+		compatible = "ovti,ov2735";
+		reg = <0x3c>;
+		clocks = <&cru SCLK_CIF_OUT>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&cif_clkouta &ov2735_pins>;
+		avdd-supply = <&vcc2v8_cam>;
+		dvdd-supply = <&vcc1v8_cam>;
+		dovdd-supply = <&vcc1v8_cam>;
+		reset-gpios = <&gpio2 RK_PA2 GPIO_ACTIVE_LOW>;
+		/* stock pwdn-gpios GPIO2_A4 active high == enable active low */
+		enable-gpios = <&gpio2 RK_PA4 GPIO_ACTIVE_LOW>;
+		status = "disabled";
+	};
+};
+
+/* i2c4: Atmel maXTouch mXT1066 (family 164, variant 11, FW 1.2.AA) */
+&i2c4 {
+	i2c-scl-rising-time-ns = <475>;
+	i2c-scl-falling-time-ns = <26>;
+	status = "okay";
+
+	/*
+	 * The 6 capacitive keys are the T15 key array of the chip. The board
+	 * file sets "linux,keycodes" for T15, because the key order differs
+	 * between the models. "linux,keycodes" keeps this a direct
+	 * touchscreen ("linux,gpio-keymap" would make it a touchpad).
+	 */
+	touchscreen: touchscreen@4a {
+		compatible = "atmel,maxtouch";
+		reg = <0x4a>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PC2 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_pins>;
+		reset-gpios = <&gpio1 RK_PB5 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&io_domains {
+	bt656-supply = <&vcc_1v8>;
+	audio-supply = <&vcc_1v8mic>;
+	gpio1830-supply = <&vcc_3v0>;
+	status = "okay";
+};
+
+&pmu_io_domains {
+	pmu1830-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+&tsadc {
+	/* stock: tshut via OTP_OUT GPIO to the PMIC, active high */
+	rockchip,hw-tshut-mode = <1>;
+	rockchip,hw-tshut-polarity = <1>;
+	status = "okay";
+};
+
+&saradc {
+	/* ch1 = recovery key, ch2 = handset detect (stock gs_handset_det) */
+	vref-supply = <&vcc_1v8>;
+	status = "okay";
+};
+
+&gpu {
+	mali-supply = <&vdd_gpu>;
+	status = "okay";
+};
+
+&i2s0 {
+	rockchip,playback-channels = <4>;
+	rockchip,capture-channels = <8>;
+	status = "okay";
+
+	i2s0_port: port {
+		i2s0_ep: endpoint {
+			remote-endpoint = <&mcodec0_ep>;
+			dai-format = "i2s";
+			bitclock-master;
+			frame-master;
+			mclk-fs = <256>;
+		};
+	};
+};
+
+&i2s1 {
+	rockchip,playback-channels = <2>;
+	rockchip,capture-channels = <2>;
+	status = "okay";
+};
+
+/* AP6256 Wi-Fi (BCM43456) on SDIO0, SDR104 as stock */
+&sdio0 {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-sdio-irq;
+	disable-wp;
+	keep-power-in-suspend;
+	max-frequency = <150000000>;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	non-removable;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio0_bus4 &sdio0_cmd &sdio0_clk>;
+	sd-uhs-sdr104;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	wifi@1 {
+		compatible = "brcm,bcm43456-fmac", "brcm,bcm4329-fmac";
+		reg = <1>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PA0 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "host-wake";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_host_wake>;
+	};
+};
+
+/* AP6256 Bluetooth (BCM4345C5) on UART0 with RTS/CTS */
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_xfer &uart0_cts &uart0_rts>;
+	uart-has-rtscts;
+	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm4345c5";
+		clocks = <&rk808 1>;
+		clock-names = "lpo";
+		device-wakeup-gpios = <&gpio2 RK_PD2 GPIO_ACTIVE_HIGH>;
+		host-wakeup-gpios = <&gpio1 RK_PA2 GPIO_ACTIVE_HIGH>;
+		shutdown-gpios = <&gpio0 RK_PB1 GPIO_ACTIVE_HIGH>;
+		max-speed = <1500000>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&bt_host_wake &bt_wake &bt_enable>;
+		vbat-supply = <&vcc3v3_sys>;
+		vddio-supply = <&vcc_1v8>;
+	};
+};
+
+/*
+ * Lines without a kernel consumer, named for userspace (libgpiod):
+ * PoE class/PSE detect (stock "grandstream,poe-det"), and the two codec-side
+ * external amplifier enables of the vendor aic3x driver ("hf-ext-amp" =
+ * "Handfree Speaker Amp", "hs-ext-amp" = "Handset Speaker Amp").
+ */
+&gpio0 {
+	gpio-line-names =
+		/* A0-A7 */ "", "", "", "", "", "", "", "",
+		/* B0-B7 */ "", "", "", "", "", "HF_EXT_AMP_EN", "", "",
+		/* C0-C7 */ "", "", "", "", "", "", "", "",
+		/* D0-D7 */ "", "", "", "", "", "", "", "";
+};
+
+&gpio1 {
+	gpio-line-names =
+		/* A0-A7 */ "", "", "", "", "", "", "", "",
+		/* B0-B7 */ "HS_EXT_AMP_EN", "", "", "", "", "", "", "",
+		/* C0-C7 */ "", "", "", "", "", "", "", "",
+		/* D0-D7 */ "", "", "", "", "", "", "", "";
+
+	/*
+	 * SYR828 (vdd_gpu) VSEL = GPIO1_B6, SYR827 (vdd_cpu_b) VSEL = GPIO1_C1.
+	 * Stock drives both output-low (runtime voltage from VSEL0, which is the
+	 * register mainline fan53555 programs with suspend-voltage-selector 1).
+	 * The mainline driver ignores vsel-gpios, so hog them low here instead
+	 * of relying on the pinctrl pull-down alone.
+	 */
+	vsel-hog {
+		gpio-hog;
+		gpios = <RK_PB6 GPIO_ACTIVE_HIGH>, <RK_PC1 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "vsel_gpu_cpub";
+	};
+};
+
+&gpio2 {
+	gpio-line-names =
+		/* A0-A7 */ "", "", "", "", "", "TAS5825M_FAULT", "PSE_DET1", "PSE_DET2",
+		/* B0-B7 */ "POE_802_3AT", "", "", "", "", "", "", "",
+		/* C0-C7 */ "", "", "", "", "", "", "", "",
+		/* D0-D7 */ "", "", "", "", "", "", "", "";
+};
+
+&gpio4 {
+	gpio-line-names =
+		/* A0-A7 */ "", "", "", "", "", "", "", "",
+		/* B0-B7 */ "", "", "", "", "", "", "", "",
+		/* C0-C7 */ "", "", "", "", "", "", "", "",
+		/* D0-D7 */ "", "USB_CURRENT", "", "", "", "", "", "";
+};
+
+&emmc_phy {
+	status = "okay";
+};
+
+&sdhci {
+	bus-width = <8>;
+	mmc-hs200-1_8v;
+	non-removable;
+	status = "okay";
+};
+
+&uart2 {
+	status = "okay";
+};
+
+&u2phy0 {
+	status = "okay";
+};
+
+&u2phy0_otg {
+	status = "okay";
+};
+
+/* Stock DT disables u2phy1, usbdrd3_1, tcphy1 and all EHCI/OHCI: not wired. */
+&u2phy1 {
+	status = "disabled";
+};
+
+&u2phy1_otg {
+	status = "disabled";
+};
+
+&usbdrd3_0 {
+	status = "okay";
+};
+
+/*
+ * USB-C port: dual-role, role chosen by the fusb302/TCPM through the USB
+ * role switch (dwc3 starts, and stays when nothing is attached, in device
+ * mode so the configfs gadget can bind). USB 2.0 only: the Type-C PHY
+ * (tcphy0, SuperSpeed + orientation) is not used yet.
+ */
+&usbdrd_dwc3_0 {
+	dr_mode = "otg";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+	maximum-speed = "high-speed";
+	phys = <&u2phy0_otg>;
+	phy-names = "usb2-phy";
+	snps,dis_u2_susphy_quirk;
+	status = "okay";
+
+	port {
+		dwc3_0_role_switch: endpoint {
+			remote-endpoint = <&usbc_hs>;
+		};
+	};
+};
+
+&usbdrd3_1 {
+	status = "disabled";
+};
+
+&usbdrd_dwc3_1 {
+	status = "disabled";
+};
+
+&pwm0 {
+	status = "okay";
+};
+
+/* Display: VOPB -> MIPI DSI0 -> panel. The board file sets the panel compatible. */
+&vopb {
+	status = "okay";
+	/delete-property/ iommus;
+
+	/*
+	 * Pixel clock (dclk_vop0): source it from VPLL set to 1200 MHz, so the
+	 * integer divider gives exactly 120 MHz (VPLL/10) for the UC-P10 panel.
+	 * Mainline rk3399.dtsi leaves the VOP dclk
+	 * mux/parent unset, and dclk_vop0_div does not retune its PLL, so the
+	 * source PLL must be pre-set to a divisible rate. ACLK/HCLK repeated
+	 * because overriding assigned-clocks replaces the base vopb values.
+	 */
+	assigned-clocks = <&cru DCLK_VOP0_DIV>, <&cru DCLK_VOP0>,
+			  <&cru PLL_VPLL>, <&cru ACLK_VOP0>, <&cru HCLK_VOP0>;
+	assigned-clock-parents = <&cru PLL_VPLL>, <&cru DCLK_VOP0_DIV>;
+	assigned-clock-rates = <0>, <0>,
+			       <1200000000>, <400000000>, <100000000>;
+};
+
+&vopb_mmu {
+	status = "disabled";
+};
+
+&vopl {
+	status = "okay";
+	/delete-property/ iommus;
+};
+
+&vopl_mmu {
+	status = "disabled";
+};
+
+&mipi_dsi {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	panel: panel@0 {
+		reg = <0>;
+		backlight = <&backlight>;
+		power-supply = <&vcc3v3_lcd2>;
+		/* panel is mounted rotated; fbcon=rotate:3 in bootargs matches */
+		rotation = <270>;
+		/* stock reset-gpios <phandle 0x2f = gpio1, pin 24 = RK_PD0> */
+		reset-gpios = <&gpio1 RK_PD0 GPIO_ACTIVE_LOW>;
+
+		port {
+			mipi_in_panel: endpoint {
+				remote-endpoint = <&mipi_out_panel>;
+			};
+		};
+	};
+};
+
+&mipi_out {
+	mipi_out_panel: endpoint {
+		remote-endpoint = <&mipi_in_panel>;
+	};
+};
+
+/*
+ * Ethernet: the GMAC RGMII goes to an on-board Realtek RTL8364B 2-port GbE
+ * switch (no discrete PHY). Port 3 = LAN (PoE in), port 1 = PC pass-through.
+ * MAC-side values (delays, clocking, reset GPIO and timing) are from the
+ * stock 1.0.6.20 DT. The switch drives its RGMII port as a forced 1000/full
+ * link, so the MAC uses a fixed link (the LAN port speed is the switch's
+ * business). Userspace configures the switch through the realtek-rtl8364b-smi
+ * driver (SMI over MDIO address 29) BEFORE eth0 is opened: rtl8363-init
+ * replays the init of the stock kernel MDIO reset hook.
+ */
+&gmac {
+	assigned-clocks = <&cru SCLK_RMII_SRC>;
+	assigned-clock-parents = <&cru SCLK_MAC>;
+	assigned-clock-rates = <125000000>;
+	clock_in_out = "output";
+	/* The MAC adds the RGMII delays (tx_delay, rx_delay), as stock does. */
+	phy-mode = "rgmii";
+	phy-supply = <&vcc_phy>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&rgmii_pins>;
+	snps,reset-gpio = <&gpio3 RK_PC0 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
+	snps,reset-delays-us = <0 20000 100000>;
+	tx_delay = <0x1a>;
+	rx_delay = <0x00>;
+	status = "okay";
+
+	fixed-link {
+		speed = <1000>;
+		full-duplex;
+		pause;
+	};
+
+	mdio {
+		compatible = "snps,dwmac-mdio";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * RTL8364B SMI slave. (Its internal PHYs answer at MDIO 1 and 3,
+		 * PHY ID 0x001cc943; they are managed through the switch.)
+		 */
+		switch@1d {
+			compatible = "realtek,rtl8364b-smi";
+			reg = <29>;
+		};
+	};
+};
+
+/* USB-C controller (stock: "fairchild,fusb302" on i2c3 @0x22, PD disabled) */
+&i2c3 {
+	i2c-scl-rising-time-ns = <600>;
+	i2c-scl-falling-time-ns = <20>;
+	status = "okay";
+
+	/*
+	 * Solteam JSA1213 ambient light sensor (stock "ls_jsa1213", polled).
+	 * The stock sensor_operate shows the JSA1212 register core (CONF 0x01,
+	 * INT 0x02, 12-bit ALS data 0x09/0x0A); the mainline jsa1212 driver
+	 * binds and reads it. Stock also writes reg 0x0F = 0x29 at init
+	 * (meaning unknown, not done here).
+	 */
+	light-sensor@44 {
+		compatible = "solteam,jsa1212";
+		reg = <0x44>;
+	};
+
+	fusb0: typec-portc@22 {
+		compatible = "fcs,fusb302";
+		reg = <0x22>;
+		interrupt-parent = <&gpio4>;
+		interrupts = <RK_PC7 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fusb0_int>;
+		vbus-supply = <&vbus_typec>;
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "dual";
+			power-role = "dual";
+			try-power-role = "sink";
+			self-powered;
+			pd-disable;
+			typec-power-opmode = "default";
+
+			ports {
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				port@0 {
+					reg = <0>;
+
+					usbc_hs: endpoint {
+						remote-endpoint = <&dwc3_0_role_switch>;
+					};
+				};
+			};
+		};
+	};
+};
+
+&pinctrl {
+	/* PoE detect inputs: no kernel consumer, pulls applied as a hog */
+	pinctrl-names = "default";
+	pinctrl-0 = <&poe_det_pins>;
+
+	pmic {
+		pmic_int_l: pmic-int-l {
+			rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		vsel1_pin: vsel1-pin {
+			rockchip,pins = <1 RK_PC1 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+
+		vsel2_pin: vsel2-pin {
+			rockchip,pins = <1 RK_PB6 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+	};
+
+	sdio-pwrseq {
+		wifi_enable_h: wifi-enable-h {
+			rockchip,pins = <0 RK_PB2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	wireless-wlan {
+		wifi_host_wake: wifi-host-wake {
+			rockchip,pins = <1 RK_PA0 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	bluetooth {
+		bt_enable: bt-enable {
+			rockchip,pins = <0 RK_PB1 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		bt_host_wake: bt-host-wake {
+			rockchip,pins = <1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+
+		bt_wake: bt-wake {
+			rockchip,pins = <2 RK_PD2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	sound {
+		sound_en: sound-en {
+			rockchip,pins = <4 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		/* PDN, MUTEZ, FAULT */
+		tas5825m_pins: tas5825m-pins {
+			rockchip,pins = <0 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>,
+					<2 RK_PB1 RK_FUNC_GPIO &pcfg_pull_up>,
+					<2 RK_PA5 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		/*
+		 * reset, hf-ext-amp (GPIO0_B5) and hs-ext-amp (GPIO1_B0). Both
+		 * amplifier enables are driven HIGH by this default state when the
+		 * codec probes (hands-free speaker and handset both on; both are fed
+		 * from the AIC3104 right DAC, I2S0 channel 4). No hog: the lines stay
+		 * free, so userspace can still switch them (gpio chardev).
+		 */
+		aic3104_pins: aic3104-pins {
+			rockchip,pins = <2 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>,
+					<0 RK_PB5 RK_FUNC_GPIO &pcfg_output_high>,
+					<1 RK_PB0 RK_FUNC_GPIO &pcfg_output_high>;
+		};
+	};
+
+	touchscreen {
+		touch_pins: touch-pins {
+			rockchip,pins = <1 RK_PC2 RK_FUNC_GPIO &pcfg_pull_up>,
+					<1 RK_PB5 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
+	camera {
+		ov2735_pins: ov2735-pins {
+			rockchip,pins = <2 RK_PA2 RK_FUNC_GPIO &pcfg_pull_up>,
+					<2 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	buttons {
+		switches: switches {
+			rockchip,pins = <2 RK_PB2 RK_FUNC_GPIO &pcfg_pull_up>,
+					<4 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>,
+					<1 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	leds {
+		led_pins: led-pins {
+			rockchip,pins = <1 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>,
+					<1 RK_PA1 RK_FUNC_GPIO &pcfg_pull_up>,
+					<0 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>,
+					<4 RK_PD5 RK_FUNC_GPIO &pcfg_pull_up>,
+					<4 RK_PD6 RK_FUNC_GPIO &pcfg_pull_up>,
+					<4 RK_PD4 RK_FUNC_GPIO &pcfg_pull_up>,
+					<0 RK_PA4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	poe {
+		poe_det_pins: poe-det-pins {
+			rockchip,pins = <2 RK_PB0 RK_FUNC_GPIO &pcfg_pull_up>,
+					<2 RK_PA6 RK_FUNC_GPIO &pcfg_pull_up>,
+					<2 RK_PA7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
+	fusb302 {
+		fusb0_int: fusb0-int {
+			rockchip,pins = <4 RK_PC7 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		vbus_typec_en: vbus-typec-en {
+			rockchip,pins = <4 RK_PD2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+};
+
+/*
+ * The loader leaves the big-cluster PLL (BPLL) in slow mode: armclkb runs
+ * at 12 MHz (24 MHz xin / 2) and the A72 cores time out while coming
+ * online. Put BPLL in normal mode at 816 MHz when the CRU registers.
+ * Setting the rate of PLL_APLLB (the PLL mode mux) makes the clock core
+ * pick the PLL output parent (normal mode); the cpuclk notifier sets the
+ * armclkb dividers. At that point vdd_cpu_b is the SYR827 power-on value
+ * (1000 mV measured), above the 825 mV that 816 MHz needs, and the
+ * big cores are still offline. The rk3399-base.dtsi entries are repeated
+ * because this property replaces the whole list.
+ */
+&cru {
+	assigned-clocks =
+		<&cru PLL_GPLL>, <&cru PLL_CPLL>,
+		<&cru PLL_NPLL>,
+		<&cru ACLK_PERIHP>, <&cru HCLK_PERIHP>,
+		<&cru PCLK_PERIHP>,
+		<&cru ACLK_PERILP0>, <&cru HCLK_PERILP0>,
+		<&cru PCLK_PERILP0>, <&cru ACLK_CCI>,
+		<&cru HCLK_PERILP1>, <&cru PCLK_PERILP1>,
+		<&cru ACLK_VIO>, <&cru ACLK_HDCP>,
+		<&cru ACLK_GIC_PRE>,
+		<&cru PCLK_DDR>,
+		<&cru ACLK_VDU>,
+		<&cru PLL_APLLB>;
+	assigned-clock-rates =
+		 <594000000>,  <800000000>,
+		<1000000000>,
+		 <150000000>,   <75000000>,
+		  <37500000>,
+		 <100000000>,  <100000000>,
+		  <50000000>, <600000000>,
+		 <100000000>,   <50000000>,
+		 <400000000>, <400000000>,
+		 <200000000>,
+		 <200000000>,
+		 <400000000>,
+		 <816000000>;
+};
+
+/*
+ * CPU DVFS. cpu-supply: little = RK808 DCDC2 (vdd_cpu_l), big = SYR827
+ * (vdd_cpu_b). The OPP tables are the ones from rk3399.dtsi. Every mainline
+ * OPP voltage is >= the stock 1.0.6.20 "L0" (worst-leakage) voltage for the
+ * same frequency, so the CPUs never run below what the vendor validated for
+ * any bin.
+ *
+ * On the tested UC-P10 the stock kernel (/d/opp/opp_summary) runs the chip
+ * at its "L2" bin: big 408/600/816 MHz 800 mV, 1008 850, 1200 900, 1416 1000,
+ * 1608 1050, 1800 1150; little only 1416 MHz at 1075 mV; GPU 200-400 MHz
+ * 800 mV, 600 900, 800 1050. Mainline's values are 25-50 mV above those.
+ *
+ * Little 408/600 MHz raised from 825 to 850 mV: RK808 keeps the last OPP
+ * voltage across a warm reset/reboot/panic, and the loader then runs the
+ * little cluster at ~816 MHz, whose stock L0 voltage is 850 mV.
+ */
+&cluster0_opp {
+	opp00 {
+		opp-microvolt = <850000 850000 1250000>;
+	};
+
+	opp01 {
+		opp-microvolt = <850000 850000 1250000>;
+	};
+};
+
+&cpu_l0 {
+	cpu-supply = <&vdd_cpu_l>;
+};
+
+&cpu_l1 {
+	cpu-supply = <&vdd_cpu_l>;
+};
+
+&cpu_l2 {
+	cpu-supply = <&vdd_cpu_l>;
+};
+
+&cpu_l3 {
+	cpu-supply = <&vdd_cpu_l>;
+};
+
+&cpu_b0 {
+	cpu-supply = <&vdd_cpu_b>;
+};
+
+&cpu_b1 {
+	cpu-supply = <&vdd_cpu_b>;
+};
