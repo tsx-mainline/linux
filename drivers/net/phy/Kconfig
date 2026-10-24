@@ -384,6 +384,18 @@ config QSEMI_PHY
 
 source "drivers/net/phy/realtek/Kconfig"
 
+config REALTEK_RTL8364B_SMI
+	tristate "Realtek RTL8364B switch register access (sysfs)"
+	depends on OF
+	help
+	  Binds to a Realtek RTL8364B switch on an MDIO bus, for example on
+	  the GMAC MDIO bus of the Crestron UC-P10. The driver gives the
+	  switch registers (Realtek SMI over MDIO) to userspace through a
+	  sysfs file. A userspace tool can then configure the switch before
+	  the MAC is opened.
+
+	  If M is selected the module will be called realtek-rtl8364b-smi.
+
 config RENESAS_PHY
 	tristate "Renesas PHYs"
 	help

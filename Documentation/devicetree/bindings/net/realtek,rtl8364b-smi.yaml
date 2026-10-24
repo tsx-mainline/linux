@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/net/realtek,rtl8364b-smi.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Realtek RTL8364B switch register access over MDIO
+
+maintainers:
+  - unex <7575866+unex@users.noreply.github.com>
+
+description:
+  The Realtek RTL8364B is a 2-port gigabit Ethernet switch with an RGMII
+  port to the host MAC. Its registers are reached with the Realtek "SMI over
+  MDIO" indirect protocol at one MDIO address. This node describes that
+  register interface. The operating system configures the switch through
+  it before the host MAC is opened. The node does not describe the switch
+  ports, so the host MAC uses a fixed link to the switch.
+
+properties:
+  compatible:
+    const: realtek,rtl8364b-smi
+
+  reg:
+    maxItems: 1
+    description: MDIO address of the SMI interface.
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false
+
+examples:
+  - |
+    mdio {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        switch@1d {
+            compatible = "realtek,rtl8364b-smi";
+            reg = <29>;
+        };
+    };
+
+...
