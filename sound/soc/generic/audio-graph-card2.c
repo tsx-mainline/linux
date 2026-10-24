@@ -602,6 +602,12 @@ static int graph_parse_node_multi(struct simple_util_priv *priv,
 	int nm_max = max(dai_link->num_cpus, dai_link->num_codecs);
 
 	/*
+	 * graph_get_next_multi_ep() drops the reference of the port that it
+	 * gets. The caller keeps its own reference and drops it later.
+	 */
+	port = of_node_get(port);
+
+	/*
 	 * create ch_maps if CPU:Codec = N:M
 	 * DPCM is out of scope
 	 */
@@ -651,6 +657,7 @@ static int graph_parse_node_multi(struct simple_util_priv *priv,
 		ret = -EINVAL;
 
 multi_err:
+	of_node_put(port);
 	return graph_ret(priv, ret);
 }
 
@@ -754,7 +761,6 @@ static void graph_link_init(struct simple_util_priv *priv,
 	if (graph_lnk_is_multi(port_cpu)) {
 		multi_cpu_port = port_cpu;
 		ep_cpu = graph_get_next_multi_ep(&multi_cpu_port, multi_cpu_port_idx++);
-		of_node_put(port_cpu);
 		port_cpu = ep_to_port(ep_cpu);
 	} else {
 		of_node_get(ep_cpu);
@@ -764,7 +770,6 @@ static void graph_link_init(struct simple_util_priv *priv,
 	if (graph_lnk_is_multi(port_codec)) {
 		multi_codec_port = port_codec;
 		ep_codec = graph_get_next_multi_ep(&multi_codec_port, multi_codec_port_idx++);
-		of_node_put(port_codec);
 		port_codec = ep_to_port(ep_codec);
 	} else {
 		of_node_get(ep_codec);
@@ -806,15 +811,19 @@ static void graph_link_init(struct simple_util_priv *priv,
 	for_each_link_cpus(dai_link, i, dlc) {
 		dlc->ext_fmt = graph_parse_bitframe(ep_cpu);
 
-		if (multi_cpu_port)
+		if (multi_cpu_port) {
+			of_node_put(ep_cpu);
 			ep_cpu = graph_get_next_multi_ep(&multi_cpu_port, multi_cpu_port_idx++);
+		}
 	}
 
 	for_each_link_codecs(dai_link, i, dlc) {
 		dlc->ext_fmt = graph_parse_bitframe(ep_codec);
 
-		if (multi_codec_port)
+		if (multi_codec_port) {
+			of_node_put(ep_codec);
 			ep_codec = graph_get_next_multi_ep(&multi_codec_port, multi_codec_port_idx++);
+		}
 	}
 
 	/*** Don't use port_cpu / port_codec after here ***/
@@ -835,6 +844,8 @@ static void graph_link_init(struct simple_util_priv *priv,
 	of_node_put(port_codec);
 	of_node_put(ep_cpu);
 	of_node_put(ep_codec);
+	of_node_put(multi_cpu_port);
+	of_node_put(multi_codec_port);
 }
 
 int audio_graph2_link_normal(struct simple_util_priv *priv,
