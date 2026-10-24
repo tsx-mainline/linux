@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/panel/crestron,uc-p10-himax-panel.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Crestron UC-P10 1200x1920 MIPI-DSI panel
+
+maintainers:
+  - unex <7575866+unex@users.noreply.github.com>
+
+description:
+  The built-in panel of the Crestron UC-P10 is a 1200x1920 video-mode panel
+  with a Himax HX8279-family controller on four DSI lanes. The panel has one
+  power supply and an active-low reset line.
+
+allOf:
+  - $ref: panel-common.yaml#
+
+properties:
+  compatible:
+    const: crestron,uc-p10-himax-panel
+
+  reg:
+    maxItems: 1
+
+  power-supply: true
+  reset-gpios: true
+  backlight: true
+  rotation: true
+  port: true
+
+required:
+  - compatible
+  - reg
+  - power-supply
+  - reset-gpios
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    dsi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        panel@0 {
+            compatible = "crestron,uc-p10-himax-panel";
+            reg = <0>;
+            backlight = <&backlight>;
+            power-supply = <&vcc3v3_lcd>;
+            reset-gpios = <&gpio1 24 GPIO_ACTIVE_LOW>;
+            rotation = <270>;
+
+            port {
+                panel_in: endpoint {
+                    remote-endpoint = <&dsi_out>;
+                };
+            };
+        };
+    };
+
+...
