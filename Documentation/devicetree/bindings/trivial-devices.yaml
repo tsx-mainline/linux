@@ -457,6 +457,8 @@ properties:
           - smsc,emc6d103s
             # Socionext Uniphier SMP control registers
           - socionext,uniphier-smpctrl
+            # Solteam JSA1212 ambient light and proximity sensor
+          - solteam,jsa1212
             # Sony APS-379 Power Supply
           - sony,aps-379
             # SparkFun Qwiic Joystick (COM-15168) with i2c interface
