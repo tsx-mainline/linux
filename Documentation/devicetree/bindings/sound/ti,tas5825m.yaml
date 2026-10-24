@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/ti,tas5825m.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Texas Instruments TAS5825M stereo class-D amplifier
+
+maintainers:
+  - unex <7575866+unex@users.noreply.github.com>
+
+description:
+  The TAS5825M is a stereo class-D amplifier with an integrated audio DSP,
+  controlled over I2C. The DSP configuration is a PurePath Console 3
+  register sequence that is loaded as firmware.
+
+allOf:
+  - $ref: dai-common.yaml#
+
+properties:
+  compatible:
+    const: ti,tas5825m
+
+  reg:
+    maxItems: 1
+
+  '#sound-dai-cells':
+    const: 0
+
+  pvdd-supply:
+    description: Power-stage (PVDD) supply.
+
+  pdn-gpios:
+    maxItems: 1
+    description: PDN pin. Assert (logical 1) to hold the device in power-down.
+
+  mute-gpios:
+    maxItems: 1
+    description: MUTEZ pin. Logical 1 mutes the output stage.
+
+  ti,dsp-config-name:
+    $ref: /schemas/types.yaml#/definitions/string
+    description:
+      Name of the DSP configuration. The driver loads the firmware file
+      "tas5825m_<name>.bin", a list of <register, value> byte pairs, where
+      register 0xfe means "delay <value> milliseconds".
+
+  port:
+    $ref: audio-graph-port.yaml#
+    unevaluatedProperties: false
+
+required:
+  - compatible
+  - reg
+  - pvdd-supply
+  - pdn-gpios
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+    i2c {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        amplifier@4d {
+            compatible = "ti,tas5825m";
+            reg = <0x4d>;
+            #sound-dai-cells = <0>;
+            pdn-gpios = <&gpio0 7 GPIO_ACTIVE_LOW>;
+            mute-gpios = <&gpio2 9 GPIO_ACTIVE_LOW>;
+            pvdd-supply = <&vcc_sound>;
+            ti,dsp-config-name = "board";
+        };
+    };

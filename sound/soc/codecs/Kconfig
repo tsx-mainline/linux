@@ -2140,6 +2140,18 @@ config SND_SOC_TAS5805M
 	  DSP. DSP configuration for each instance needs to be supplied
 	  via a device-tree attribute.
 
+config SND_SOC_TAS5825M
+	tristate "Texas Instruments TAS5825M speaker amplifier"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Enable support for the Texas Instruments TAS5825M Class-D
+	  amplifier. The DSP configuration (a PPC3 register sequence) is
+	  loaded as firmware named after the "ti,dsp-config-name" property.
+	  The output stays in Hi-Z until a playback stream starts.
+
+	  If M is selected the module will be called snd-soc-tas5825m.
+
 config SND_SOC_TAS6424
 	tristate "Texas Instruments TAS6424 Quad-Channel Audio amplifier"
 	depends on I2C
