@@ -8,7 +8,11 @@
  *
  * The display path is VOPB -> MIPI DSI0 -> panel, with a pwm0 backlight.
  * rockchip-drm owns the display after the kernel starts. There is no
- * simple-framebuffer.
+ * simple-framebuffer: the vendor U-Boot shows its logo as a centered,
+ * mirrored window, which a simple-framebuffer cannot describe, and
+ * rockchip-drm binds before user space starts. The memory of that logo is
+ * reserved below, so the VOP keeps scanning intact pixels until
+ * rockchip-drm resets it.
  *
  * The memory banks avoid the OP-TEE secure carve-out at
  * 0x08400000..0x0a200000. The boot shim gives this DTB to the kernel, so
@@ -64,6 +68,21 @@
 			linux,cma-default;
 			size = <0x0 0x04000000>;
 			alloc-ranges = <0x0 0x0a200000 0x0 0x40000000>;
+		};
+
+		/*
+		 * The display memory of the vendor U-Boot: the logo pool of
+		 * its rockchip_display driver (32 MiB, the size of the video
+		 * device). U-Boot puts it at the top of RAM (0xf8000000), below
+		 * its page tables (less than 1 MiB), and rounds the start down
+		 * to 1 MiB. U-Boot decodes the BMP logos of the resource there,
+		 * and the VOP scans one of them until rockchip-drm binds. The
+		 * kernel must not use this memory before then, or the logo
+		 * shows the new content of the pages.
+		 */
+		uboot_logo: framebuffer@f5f00000 {
+			reg = <0x0 0xf5f00000 0x0 0x02000000>;
+			no-map;
 		};
 	};
 
