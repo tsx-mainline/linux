@@ -2149,6 +2149,8 @@ config SND_SOC_TAS5825M
 	  amplifier. The DSP configuration (a PPC3 register sequence) is
 	  loaded as firmware named after the "ti,dsp-config-name" property.
 	  The output stays in Hi-Z until a playback stream starts.
+	  Without the firmware file the amplifier stays in power-down and
+	  the rest of the sound card still works.
 
 	  If M is selected the module will be called snd-soc-tas5825m.
 
