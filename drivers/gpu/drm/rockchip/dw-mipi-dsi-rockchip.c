@@ -18,6 +18,7 @@
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
+#include <linux/units.h>
 
 #include <video/mipi_display.h>
 
@@ -285,6 +286,7 @@ struct dw_mipi_dsi_rockchip {
 	struct phy_configure_opts_mipi_dphy dphy_config;
 
 	unsigned int lane_mbps; /* per lane */
+	unsigned int max_lane_mbps; /* hs_rate of the DSI device, 0 = none */
 	u16 input_div;
 	u16 feedback_div;
 	u32 format;
@@ -591,6 +593,20 @@ dw_mipi_dsi_get_lane_mbps(void *priv_data, const struct drm_display_mode *mode,
 		*lane_mbps = dsi->lane_mbps;
 
 		return 0;
+	}
+
+	/*
+	 * The DSI device can give the highest lane rate that it accepts
+	 * (hs_rate). Use it as the limit, but never go below the bandwidth
+	 * of the pixel data.
+	 */
+	if (dsi->max_lane_mbps && target_mbps > dsi->max_lane_mbps) {
+		if (dsi->max_lane_mbps >= mpclk * bpp / lanes)
+			target_mbps = dsi->max_lane_mbps;
+		else
+			DRM_DEV_ERROR(dsi->dev,
+				      "hs_rate %u Mbps is below the pixel bandwidth\n",
+				      dsi->max_lane_mbps);
 	}
 
 	fin = clk_get_rate(dsi->pllref_clk);
@@ -1045,6 +1061,8 @@ static int dw_mipi_dsi_rockchip_host_attach(void *priv_data,
 
 	dsi->usage_mode = DW_DSI_USAGE_DSI;
 	mutex_unlock(&dsi->usage_mutex);
+
+	dsi->max_lane_mbps = device->hs_rate / HZ_PER_MHZ;
 
 	ret = component_add(dsi->dev, &dw_mipi_dsi_rockchip_ops);
 	if (ret) {
