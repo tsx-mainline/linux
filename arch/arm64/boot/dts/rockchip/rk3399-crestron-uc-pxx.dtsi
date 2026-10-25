@@ -224,6 +224,12 @@
 			label = "blue";
 			gpios = <&gpio0 RK_PB3 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
+			/*
+			 * The boot blink starts with the LED driver. The
+			 * initramfs sets the slow timing (500 ms on, 1500 ms
+			 * off), and uc-pxx-leds takes it over without a gap.
+			 */
+			linux,default-trigger = "timer";
 		};
 
 		led-mute-speaker {
