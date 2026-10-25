@@ -1262,10 +1262,15 @@
 };
 
 /*
- * `reboot loader` (and `reboot bootloader`) writes the loader magic to
- * PMUGRF_OS_REG0, and the vendor U-Boot then enters the download (rockusb)
- * mode. The values are the ones of the stock device tree. Without this node
- * the reboot command argument is ignored.
+ * The reboot command argument selects what the vendor U-Boot does next. The
+ * values are the ones of the stock device tree:
+ * - `reboot loader` and `reboot bootloader` write BOOT_BL_DOWNLOAD, and U-Boot
+ *   enters the download (rockusb) mode. The stock Android system also maps
+ *   "bootloader" to rockusb, so the name keeps that meaning here.
+ * - `reboot fastboot` writes BOOT_FASTBOOT, and U-Boot enters fastboot.
+ * - A plain reboot writes BOOT_NORMAL. U-Boot does not clear the register when
+ *   it enters fastboot, so this keeps a later plain reboot out of fastboot.
+ * Without this node the reboot command argument is ignored.
  */
 &pmugrf {
 	reboot-mode {
@@ -1275,5 +1280,6 @@
 		mode-recovery = <BOOT_RECOVERY>;
 		mode-bootloader = <BOOT_BL_DOWNLOAD>;
 		mode-loader = <BOOT_BL_DOWNLOAD>;
+		mode-fastboot = <BOOT_FASTBOOT>;
 	};
 };
