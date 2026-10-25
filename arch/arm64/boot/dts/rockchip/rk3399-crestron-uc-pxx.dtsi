@@ -13,6 +13,12 @@
  * The memory banks avoid the OP-TEE secure carve-out at
  * 0x08400000..0x0a200000. The boot shim gives this DTB to the kernel, so
  * /chosen/bootargs is the kernel command line.
+ *
+ * fbcon=map:1 maps the framebuffer console to a framebuffer that does not
+ * exist, so no console text reaches the LCD and the boot splash of the
+ * initramfs owns fb0. The rescue and the text console of the root file
+ * system map it back to fb0 (FBIOPUT_CON2FBMAP). fbcon=rotate:3 turns the
+ * console upright then, and vt.global_cursor_default=0 hides its cursor.
  */
 
 #include <dt-bindings/gpio/gpio.h>
@@ -30,7 +36,7 @@
 
 	chosen {
 		stdout-path = "serial2:115200n8";
-		bootargs = "console=ttyS2,115200n8 earlycon=uart8250,mmio32,0xff1a0000 loglevel=7 clk_ignore_unused pd_ignore_unused fbcon=rotate:3 initramfs_async=0 panic=30 rdinit=/init";
+		bootargs = "console=ttyS2,115200n8 earlycon=uart8250,mmio32,0xff1a0000 loglevel=7 clk_ignore_unused pd_ignore_unused fbcon=map:1 fbcon=rotate:3 vt.global_cursor_default=0 initramfs_async=0 panic=30 rdinit=/init";
 	};
 
 	memory@200000 {
