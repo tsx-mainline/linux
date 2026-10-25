@@ -890,8 +890,9 @@
 	/delete-property/ iommus;
 
 	/*
-	 * Pixel clock (dclk_vop0): source it from VPLL set to 1200 MHz, so the
-	 * integer divider gives exactly 120 MHz (VPLL/10) for the UC-P10 panel.
+	 * Pixel clock (dclk_vop0): source it from VPLL set to 1188 MHz, so the
+	 * integer divider gives the exact pixel clock of both panels: 148.5 MHz
+	 * (VPLL/8) for the UC-P10 and 66 MHz (VPLL/18) for the UC-P8.
 	 * Mainline rk3399.dtsi leaves the VOP dclk
 	 * mux/parent unset, and dclk_vop0_div does not retune its PLL, so the
 	 * source PLL must be pre-set to a divisible rate. ACLK/HCLK repeated
@@ -901,7 +902,7 @@
 			  <&cru PLL_VPLL>, <&cru ACLK_VOP0>, <&cru HCLK_VOP0>;
 	assigned-clock-parents = <&cru PLL_VPLL>, <&cru DCLK_VOP0_DIV>;
 	assigned-clock-rates = <0>, <0>,
-			       <1200000000>, <400000000>, <100000000>;
+			       <1188000000>, <400000000>, <100000000>;
 };
 
 &vopb_mmu {

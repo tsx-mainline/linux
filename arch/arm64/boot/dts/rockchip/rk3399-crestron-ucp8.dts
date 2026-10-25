@@ -73,12 +73,3 @@
 	linux,keycodes = <KEY_PROG1 KEY_PROG2 KEY_PROG3
 			  KEY_VOLUMEDOWN KEY_VOLUMEUP KEY_MUTE>;
 };
-
-&vopb {
-	/*
-	 * VPLL at 1188 MHz, so that the integer divider gives exactly the
-	 * 66 MHz pixel clock of the panel (VPLL/18).
-	 */
-	assigned-clock-rates = <0>, <0>,
-			       <1188000000>, <400000000>, <100000000>;
-};
