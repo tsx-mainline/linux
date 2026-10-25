@@ -10,6 +10,13 @@
  * and only enters PLAY while a stream is running, so the device never sits
  * in PLAY without I2S clocks (clock-error fault).
  *
+ * The sequence file is optional. The driver is often built in and probes
+ * before the root file system is mounted, and some boards do not fit the
+ * amplifier. Without the file the probe still succeeds, so the other codecs
+ * of a multi-codec card keep working. The part then stays in power-down
+ * with the output muted, and the DAI does nothing. The driver tries to load
+ * the file once more at the first stream start.
+ *
  * Volume is the book 0 / page 0 DIG_VOL register (0x4c, 0.5 dB/step,
  * 0x30 = 0 dB, 0xff = mute). The control is capped at 0 dB.
  *
@@ -56,14 +63,18 @@ struct tas5825m_priv {
 	struct regulator *pvdd;
 	struct gpio_desc *pdn_gpio;	/* PDN pin, active low */
 	struct gpio_desc *mute_gpio;	/* MUTEZ pin, logical 1 = muted */
-	u8 *seq;
+	char fw_name[64];
+	u8 *seq;			/* NULL while no sequence is loaded */
 	size_t seq_len;
 
-	struct mutex lock;		/* protects is_playing/is_muted/configured */
+	struct mutex lock;		/* protects the fields below */
 	struct work_struct work;
 	bool is_playing;
 	bool is_muted;
 	bool configured;		/* PPC3 sequence written successfully */
+	bool powered;			/* PDN released */
+	bool fw_retried;		/* late firmware load done */
+	bool warned;			/* "not responding" logged */
 };
 
 static const struct regmap_config tas5825m_regmap = {
@@ -101,25 +112,75 @@ static int tas5825m_write_seq(struct tas5825m_priv *tas)
 	return regmap_write(tas->regmap, TAS5825M_REG_DEVICE_CTRL_2, DCTRL2_MODE_HIZ);
 }
 
+static int tas5825m_load_config(struct tas5825m_priv *tas)
+{
+	const struct firmware *fw;
+	int ret;
+
+	/* A missing file is a normal case (see the header), so no warning. */
+	ret = firmware_request_nowarn(&fw, tas->fw_name, tas->dev);
+	if (ret)
+		return ret;
+
+	if (!fw->size || (fw->size & 1)) {
+		dev_err(tas->dev, "%s: bad size %zu, ignored\n", tas->fw_name, fw->size);
+		release_firmware(fw);
+		return -EINVAL;
+	}
+
+	tas->seq = devm_kmemdup(tas->dev, fw->data, fw->size, GFP_KERNEL);
+	tas->seq_len = fw->size;
+	release_firmware(fw);
+	if (!tas->seq)
+		return -ENOMEM;
+
+	dev_info(tas->dev, "%s: %zu register writes\n", tas->fw_name, tas->seq_len / 2);
+	return 0;
+}
+
+/* Release power-down and write the sequence. Needs a loaded sequence. */
+static int tas5825m_configure(struct tas5825m_priv *tas)
+{
+	if (!tas->seq)
+		return -ENOENT;
+
+	if (!tas->powered) {
+		gpiod_set_value_cansleep(tas->pdn_gpio, 0);
+		usleep_range(10000, 15000);
+		tas->powered = true;
+	}
+	return tas5825m_write_seq(tas);
+}
+
 static void tas5825m_refresh(struct tas5825m_priv *tas)
 {
 	unsigned int chan = 0, g1 = 0, g2 = 0;
+	int ret;
 	u8 mode;
 
 	/*
-	 * If the amplifier did not answer at probe (e.g. its supply came up
-	 * late), retry the configuration before the first PLAY. Until it is
-	 * configured the output is never taken out of Hi-Z.
+	 * If the sequence file was not there at probe (root file system not
+	 * mounted yet), try once more now. If the amplifier did not answer at
+	 * probe (e.g. its supply came up late), retry the configuration before
+	 * the first PLAY. Until it is configured the output is never taken out
+	 * of Hi-Z.
 	 */
 	if (tas->is_playing && !tas->configured) {
-		if (tas5825m_write_seq(tas)) {
-			dev_warn_ratelimited(tas->dev, "amplifier not responding, output stays off\n");
-			if (tas->mute_gpio)
-				gpiod_set_value_cansleep(tas->mute_gpio, 1);
-			return;
+		if (!tas->seq && !tas->fw_retried) {
+			tas->fw_retried = true;
+			tas5825m_load_config(tas);
 		}
-		tas->configured = true;
-		dev_info(tas->dev, "configured on stream start\n");
+		if (tas->seq) {
+			ret = tas5825m_configure(tas);
+			if (!ret) {
+				tas->configured = true;
+				dev_info(tas->dev, "configured on stream start\n");
+			} else if (!tas->warned) {
+				tas->warned = true;
+				dev_warn(tas->dev, "amplifier not responding (%d), output stays off\n",
+					 ret);
+			}
+		}
 	}
 
 	if (!tas->configured) {
@@ -255,41 +316,11 @@ static const struct snd_soc_component_driver tas5825m_component = {
 	.endianness		= 1,
 };
 
-static int tas5825m_load_config(struct tas5825m_priv *tas)
-{
-	const struct firmware *fw;
-	const char *name;
-	char filename[64];
-	int ret;
-
-	if (device_property_read_string(tas->dev, "ti,dsp-config-name", &name))
-		name = "default";
-	snprintf(filename, sizeof(filename), "tas5825m_%s.bin", name);
-
-	ret = request_firmware(&fw, filename, tas->dev);
-	if (ret)
-		return dev_err_probe(tas->dev, ret, "cannot load %s\n", filename);
-
-	if (!fw->size || (fw->size & 1)) {
-		release_firmware(fw);
-		return dev_err_probe(tas->dev, -EINVAL, "%s: bad size %zu\n",
-				     filename, fw->size);
-	}
-
-	tas->seq = devm_kmemdup(tas->dev, fw->data, fw->size, GFP_KERNEL);
-	tas->seq_len = fw->size;
-	release_firmware(fw);
-	if (!tas->seq)
-		return -ENOMEM;
-
-	dev_info(tas->dev, "%s: %zu register writes\n", filename, tas->seq_len / 2);
-	return 0;
-}
-
 static int tas5825m_i2c_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
 	struct tas5825m_priv *tas;
+	const char *name;
 	int ret;
 
 	tas = devm_kzalloc(dev, sizeof(*tas), GFP_KERNEL);
@@ -319,29 +350,39 @@ static int tas5825m_i2c_probe(struct i2c_client *i2c)
 	if (IS_ERR(tas->mute_gpio))
 		return dev_err_probe(dev, PTR_ERR(tas->mute_gpio), "failed to get mute gpio\n");
 
+	if (device_property_read_string(dev, "ti,dsp-config-name", &name))
+		name = "default";
+	snprintf(tas->fw_name, sizeof(tas->fw_name), "tas5825m_%s.bin", name);
+
+	/*
+	 * Do not fail the probe without the sequence file or without an
+	 * answer from the amplifier: the rest of the sound card (the other
+	 * codec on the same I2S link) must still come up. Both are tried
+	 * again at the first stream start.
+	 */
 	ret = tas5825m_load_config(tas);
-	if (ret)
+	if (ret == -ENOMEM)
 		return ret;
+	if (ret)
+		dev_info(dev, "no %s (%d): amplifier off, retry at the first stream start\n",
+			 tas->fw_name, ret);
 
 	ret = regulator_enable(tas->pvdd);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to enable pvdd\n");
 
 	usleep_range(1000, 2000);
-	gpiod_set_value_cansleep(tas->pdn_gpio, 0);	/* release power-down */
-	usleep_range(10000, 15000);
 
-	/*
-	 * Do not fail the probe if the amplifier does not answer yet: the rest
-	 * of the sound card (the other codec on the same I2S link) must still
-	 * come up. The configuration is retried at the first stream start.
-	 */
-	ret = tas5825m_write_seq(tas);
-	if (ret)
-		dev_warn(dev, "amplifier not responding at probe (%d), will retry on stream start\n",
-			 ret);
-	else
-		tas->configured = true;
+	if (tas->seq) {
+		ret = tas5825m_configure(tas);
+		if (ret) {
+			tas->warned = true;
+			dev_warn(dev, "amplifier not responding at probe (%d), will retry on stream start\n",
+				 ret);
+		} else {
+			tas->configured = true;
+		}
+	}
 
 	ret = devm_snd_soc_register_component(dev, &tas5825m_component, &tas5825m_dai, 1);
 	if (ret)
@@ -360,7 +401,8 @@ static void tas5825m_i2c_remove(struct i2c_client *i2c)
 	struct tas5825m_priv *tas = i2c_get_clientdata(i2c);
 
 	cancel_work_sync(&tas->work);
-	regmap_write(tas->regmap, TAS5825M_REG_DEVICE_CTRL_2, DCTRL2_MODE_HIZ);
+	if (tas->powered)
+		regmap_write(tas->regmap, TAS5825M_REG_DEVICE_CTRL_2, DCTRL2_MODE_HIZ);
 	if (tas->mute_gpio)
 		gpiod_set_value_cansleep(tas->mute_gpio, 1);
 	gpiod_set_value_cansleep(tas->pdn_gpio, 1);
