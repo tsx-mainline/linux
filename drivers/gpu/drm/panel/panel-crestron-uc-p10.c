@@ -7,8 +7,8 @@
  * page 2 the analog gamma and page 3 the GOA timing.
  *
  * The stock firmware sends a flat list of DCS short writes. The list and the
- * delays come from the "panel-init-sequence-himax" and
- * "display-timings-himax" properties of the stock 1.0.6.20 device tree.
+ * delays come from the "panel-init-sequence-himax" property of the stock
+ * device tree (the same in 1.0.0.94 and 1.0.6.20).
  * The structured panel-himax-hx8279 driver uses generic writes and writes
  * registers that this list leaves at their reset value, so this driver
  * replays the stock list as it is.
@@ -230,24 +230,31 @@ static int ucp10_disable(struct drm_panel *panel)
 }
 
 /*
- * 1200x1920 with a 120 MHz pixel clock (about 47 Hz at this blanking).
- * The horizontal timing is the stock display-timings-himax value: hsync 12,
- * hbp 32, hfp 40. The vertical timing keeps the stock vsync 4 and vtotal 1984,
- * but uses vbp 22 and vfp 38 instead of the stock 25 and 35. With vbp 25 the
- * panel starts its frame 3 lines early and the last 3 lines wrap to the top.
- * A test on the hardware with DSI VID_VBP_LINES 22, VID_VFP_LINES 38 and VOP
- * VACT_ST 26 removed the wrap. HSYNC and VSYNC are active low.
+ * 1200x1920 at about 53 Hz. The stock firmware has two timings for this
+ * panel in "display-timings-himax". The 1.0.0.94 device tree, which U-Boot
+ * also uses for its logo, has 149 MHz with hfp 100, hsync 12, hbp 120 and
+ * vfp 12, vsync 6, vbp 16 (53.2 Hz). U-Boot drives it at 992 Mbps per lane.
+ * The 1.0.6.20 device tree has 120 MHz with hfp 40, hsync 12, hbp 32 and
+ * vfp 35, vsync 4, vbp 25 (47.1 Hz).
+ *
+ * The horizontal timing is the U-Boot value. The pixel clock is 148.5 MHz,
+ * VPLL 1188 MHz / 8, the nearest rate below 149 MHz with an integer divider.
+ * The vertical timing keeps vsync 4 and vbp 22 of the earlier mainline mode
+ * and uses the U-Boot vfp 12. With vsync 4 and vbp 25 the panel starts its
+ * frame 3 lines early and the last 3 lines wrap to the top. A test on the
+ * hardware with vbp 22 (VOP VACT_ST 26) removed the wrap, so the active
+ * lines keep that start. HSYNC and VSYNC are active low.
  */
 static const struct drm_display_mode ucp10_mode = {
-	.clock = 120000,		/* VPLL 1200 MHz / 10, exact integer divide */
+	.clock = 148500,		/* VPLL 1188 MHz / 8 */
 	.hdisplay = 1200,
-	.hsync_start = 1200 + 40,
-	.hsync_end = 1200 + 40 + 12,
-	.htotal = 1200 + 40 + 12 + 32,
+	.hsync_start = 1200 + 100,
+	.hsync_end = 1200 + 100 + 12,
+	.htotal = 1200 + 100 + 12 + 120,
 	.vdisplay = 1920,
-	.vsync_start = 1920 + 38,
-	.vsync_end = 1920 + 38 + 4,
-	.vtotal = 1920 + 38 + 4 + 22,
+	.vsync_start = 1920 + 12,
+	.vsync_end = 1920 + 12 + 4,
+	.vtotal = 1920 + 12 + 4 + 22,
 	.width_mm = 120,
 	.height_mm = 170,
 	.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
@@ -319,6 +326,8 @@ static int ucp10_probe(struct mipi_dsi_device *dsi)
 	dsi->format = MIPI_DSI_FMT_RGB888;
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_MODE_VIDEO_BURST |
 			  MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_NO_EOT_PACKET;
+	/* The lane rate of the stock U-Boot ("DSI-Link bandwidth: 992 Mbps"). */
+	dsi->hs_rate = 992000000;
 
 	/* The DSI host must power the PHY before the init commands. */
 	ctx->panel.prepare_prev_first = true;
