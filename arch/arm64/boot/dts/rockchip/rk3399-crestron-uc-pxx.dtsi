@@ -29,6 +29,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/soc/rockchip,boot-mode.h>
 #include "rk3399.dtsi"
 
 / {
@@ -1252,4 +1253,21 @@
 
 &cpu_b1 {
 	cpu-supply = <&vdd_cpu_b>;
+};
+
+/*
+ * `reboot loader` (and `reboot bootloader`) writes the loader magic to
+ * PMUGRF_OS_REG0, and the vendor U-Boot then enters the download (rockusb)
+ * mode. The values are the ones of the stock device tree. Without this node
+ * the reboot command argument is ignored.
+ */
+&pmugrf {
+	reboot-mode {
+		compatible = "syscon-reboot-mode";
+		offset = <0x300>;
+		mode-normal = <BOOT_NORMAL>;
+		mode-recovery = <BOOT_RECOVERY>;
+		mode-bootloader = <BOOT_BL_DOWNLOAD>;
+		mode-loader = <BOOT_BL_DOWNLOAD>;
+	};
 };
