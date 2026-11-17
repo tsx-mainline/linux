@@ -94,8 +94,17 @@ static u8 hci_cc_inquiry_cancel(struct hci_dev *hdev, void *data,
 	 * Disallowed. This should not be treated as error, since
 	 * we actually achieve what Inquiry Cancel wants to achieve,
 	 * which is to end the last Inquiry session.
+	 *
+	 * Some Broadcom controllers (BCM4345C5) answer Inquiry Cancel with
+	 * Invalid HCI Command Parameters when no inquiry is active. Treat
+	 * that the same way, or a discovery state of DISCOVERY_FINDING that
+	 * an active LE scan set is never cleared and blocks the passive
+	 * scan of hci_update_passive_scan_sync(), and with it every LE
+	 * connection that waits for that scan.
 	 */
-	if (rp->status == HCI_ERROR_COMMAND_DISALLOWED && !test_bit(HCI_INQUIRY, &hdev->flags)) {
+	if ((rp->status == HCI_ERROR_COMMAND_DISALLOWED ||
+	     rp->status == HCI_ERROR_INVALID_PARAMETERS) &&
+	    !test_bit(HCI_INQUIRY, &hdev->flags)) {
 		bt_dev_warn(hdev, "Ignoring error of Inquiry Cancel command");
 		rp->status = 0x00;
 	}
