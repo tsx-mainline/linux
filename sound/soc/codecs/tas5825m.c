@@ -11,11 +11,16 @@
  * in PLAY without I2S clocks (clock-error fault).
  *
  * The sequence file is optional. The driver is often built in and probes
- * before the root file system is mounted, and some boards do not fit the
- * amplifier. Without the file the probe still succeeds, so the other codecs
- * of a multi-codec card keep working. The part then stays in power-down
- * with the output muted, and the DAI does nothing. The driver tries to load
- * the file once more at the first stream start.
+ * before the root file system is mounted. Without the file the probe still
+ * succeeds, so the other codecs of a multi-codec card keep working. The
+ * part then stays in its reset state (deep sleep, output off) with the
+ * output muted, and the DAI does nothing. The driver tries to load the file
+ * once more at the first stream start.
+ *
+ * Some boards do not fit the amplifier. At probe the driver releases PDN
+ * and reads one register. If the part does not answer, the driver puts it
+ * back in power-down and registers the DAI without the volume control, so
+ * the card still comes up and no mixer read goes to the absent part.
  *
  * Volume is the book 0 / page 0 DIG_VOL register (0x4c, 0.5 dB/step,
  * 0x30 = 0 dB, 0xff = mute). The control is capped at 0 dB.
@@ -75,6 +80,7 @@ struct tas5825m_priv {
 	bool powered;			/* PDN released */
 	bool fw_retried;		/* late firmware load done */
 	bool warned;			/* "not responding" logged */
+	bool absent;			/* no answer at probe: not fitted */
 };
 
 static const struct regmap_config tas5825m_regmap = {
@@ -165,7 +171,7 @@ static void tas5825m_refresh(struct tas5825m_priv *tas)
 	 * the first PLAY. Until it is configured the output is never taken out
 	 * of Hi-Z.
 	 */
-	if (tas->is_playing && !tas->configured) {
+	if (tas->is_playing && !tas->configured && !tas->absent) {
 		if (!tas->seq && !tas->fw_retried) {
 			tas->fw_retried = true;
 			tas5825m_load_config(tas);
@@ -316,6 +322,48 @@ static const struct snd_soc_component_driver tas5825m_component = {
 	.endianness		= 1,
 };
 
+/*
+ * The component of an amplifier that did not answer at probe: the same DAI
+ * and DAPM graph, so the multi-codec link still binds, but no control.
+ */
+static const struct snd_soc_component_driver tas5825m_component_absent = {
+	.dapm_widgets		= tas5825m_dapm_widgets,
+	.num_dapm_widgets	= ARRAY_SIZE(tas5825m_dapm_widgets),
+	.dapm_routes		= tas5825m_dapm_routes,
+	.num_dapm_routes	= ARRAY_SIZE(tas5825m_dapm_routes),
+	.use_pmdown_time	= 1,
+	.endianness		= 1,
+};
+
+/*
+ * Release PDN and read one register. Returns 0 when the part answers.
+ * PDN stays asserted for about 100 ms after PVDD is up first: the part
+ * samples its ADR pin when PDN goes high (see the tas5805m driver).
+ */
+static int tas5825m_detect(struct tas5825m_priv *tas)
+{
+	unsigned int val;
+	int i, ret;
+
+	msleep(100);
+	gpiod_set_value_cansleep(tas->pdn_gpio, 0);
+	usleep_range(10000, 15000);
+
+	for (i = 0; i < 3; i++) {
+		ret = regmap_read(tas->regmap, TAS5825M_REG_DEVICE_CTRL_2, &val);
+		if (!ret)
+			break;
+		usleep_range(5000, 6000);
+	}
+	if (ret) {
+		gpiod_set_value_cansleep(tas->pdn_gpio, 1);
+		return ret;
+	}
+
+	tas->powered = true;
+	return 0;
+}
+
 static int tas5825m_i2c_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
@@ -354,24 +402,32 @@ static int tas5825m_i2c_probe(struct i2c_client *i2c)
 		name = "default";
 	snprintf(tas->fw_name, sizeof(tas->fw_name), "tas5825m_%s.bin", name);
 
-	/*
-	 * Do not fail the probe without the sequence file or without an
-	 * answer from the amplifier: the rest of the sound card (the other
-	 * codec on the same I2S link) must still come up. Both are tried
-	 * again at the first stream start.
-	 */
-	ret = tas5825m_load_config(tas);
-	if (ret == -ENOMEM)
-		return ret;
-	if (ret)
-		dev_info(dev, "no %s (%d): amplifier off, retry at the first stream start\n",
-			 tas->fw_name, ret);
-
 	ret = regulator_enable(tas->pvdd);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to enable pvdd\n");
 
 	usleep_range(1000, 2000);
+
+	/*
+	 * Do not fail the probe when the amplifier does not answer or when
+	 * the sequence file is missing: the rest of the sound card (the other
+	 * codec on the same I2S link) must still come up. A part that does
+	 * not answer is taken as not fitted. The file is tried again at the
+	 * first stream start.
+	 */
+	ret = tas5825m_detect(tas);
+	if (ret) {
+		tas->absent = true;
+		dev_info(dev, "no answer (%d): amplifier not fitted, no controls\n", ret);
+		goto register_component;
+	}
+
+	ret = tas5825m_load_config(tas);
+	if (ret == -ENOMEM)
+		goto err_power;
+	if (ret)
+		dev_info(dev, "no %s (%d): amplifier off, retry at the first stream start\n",
+			 tas->fw_name, ret);
 
 	if (tas->seq) {
 		ret = tas5825m_configure(tas);
@@ -384,7 +440,11 @@ static int tas5825m_i2c_probe(struct i2c_client *i2c)
 		}
 	}
 
-	ret = devm_snd_soc_register_component(dev, &tas5825m_component, &tas5825m_dai, 1);
+register_component:
+	ret = devm_snd_soc_register_component(dev,
+					      tas->absent ? &tas5825m_component_absent :
+							    &tas5825m_component,
+					      &tas5825m_dai, 1);
 	if (ret)
 		goto err_power;
 
