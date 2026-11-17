@@ -27,6 +27,7 @@
 #include <linux/spinlock.h>
 #include <linux/string_choices.h>
 
+#include "dma-iommu.h"
 #include "iommu-pages.h"
 
 /** MMU register offsets */
@@ -1204,6 +1205,7 @@ static const struct iommu_ops rk_iommu_ops = {
 	.probe_device = rk_iommu_probe_device,
 	.release_device = rk_iommu_release_device,
 	.device_group = generic_single_device_group,
+	.get_resv_regions = iommu_dma_get_resv_regions,
 	.of_xlate = rk_iommu_of_xlate,
 	.default_domain_ops = &(const struct iommu_domain_ops) {
 		.attach_dev	= rk_iommu_attach_device,
