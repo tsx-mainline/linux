@@ -12,7 +12,9 @@
  * mirrored window, which a simple-framebuffer cannot describe, and
  * rockchip-drm binds before user space starts. The memory of that logo is
  * reserved below, so the VOP keeps scanning intact pixels until
- * rockchip-drm resets it.
+ * rockchip-drm resets it. The VOPs run with their IOMMUs. The IOMMU of
+ * VOPB maps the logo memory 1:1 (iommu-addresses), so the scanout of the
+ * logo does not fault when the IOMMU is enabled before that reset.
  *
  * The memory banks avoid the OP-TEE secure carve-out at
  * 0x08400000..0x0a200000. The boot shim gives this DTB to the kernel, so
@@ -56,12 +58,12 @@
 		ranges;
 
 		/*
-		 * 64 MiB contiguous pool for rockchip-drm scanout. The VOP runs
-		 * without its IOMMU (iommus deleted below), so framebuffers must
-		 * be physically contiguous; rockchip-drm uses dma_alloc (CMA) and
-		 * programs the real physical address into WIN0_YRGB_MST.
-		 * Placed in the upper memory bank, clear of the kernel load area
-		 * (0x4000000) and OP-TEE (0x8400000..0xa200000).
+		 * 64 MiB contiguous pool (the default CMA area). The VOPs map
+		 * their buffers through their IOMMUs, so scanout does not need
+		 * it. It is reusable, so the kernel uses the pages while no
+		 * contiguous allocation needs them. Placed in the upper memory
+		 * bank, clear of the kernel load area (0x4000000) and OP-TEE
+		 * (0x8400000..0xa200000).
 		 */
 		cma_reserved: linux,cma {
 			compatible = "shared-dma-pool";
@@ -79,10 +81,14 @@
 		 * to 1 MiB. U-Boot decodes the BMP logos of the resource there,
 		 * and the VOP scans one of them until rockchip-drm binds. The
 		 * kernel must not use this memory before then, or the logo
-		 * shows the new content of the pages.
+		 * shows the new content of the pages. iommu-addresses maps the
+		 * pool 1:1 in the default IOMMU domain of VOPB. The IOMMU is
+		 * enabled when rockchip-drm powers the VOP, a moment before
+		 * the VOP reset, and U-Boot's scanout must not fault then.
 		 */
 		uboot_logo: framebuffer@f5f00000 {
 			reg = <0x0 0xf5f00000 0x0 0x02000000>;
+			iommu-addresses = <&vopb 0x0 0xf5f00000 0x0 0x02000000>;
 			no-map;
 		};
 	};
@@ -886,8 +892,8 @@
 
 /* Display: VOPB -> MIPI DSI0 -> panel. The board file sets the panel compatible. */
 &vopb {
+	memory-region = <&uboot_logo>;
 	status = "okay";
-	/delete-property/ iommus;
 
 	/*
 	 * Pixel clock (dclk_vop0): source it from VPLL set to 1188 MHz, so the
@@ -906,16 +912,15 @@
 };
 
 &vopb_mmu {
-	status = "disabled";
+	status = "okay";
 };
 
 &vopl {
 	status = "okay";
-	/delete-property/ iommus;
 };
 
 &vopl_mmu {
-	status = "disabled";
+	status = "okay";
 };
 
 &mipi_dsi {
