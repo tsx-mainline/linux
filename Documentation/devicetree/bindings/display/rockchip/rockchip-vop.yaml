@@ -77,6 +77,12 @@ properties:
   iommus:
     maxItems: 1
 
+  memory-region:
+    maxItems: 1
+    description:
+      A phandle to a node describing a reserved framebuffer memory region.
+      For example, the splash memory region set up by the bootloader.
+
   power-domains:
     maxItems: 1
 
