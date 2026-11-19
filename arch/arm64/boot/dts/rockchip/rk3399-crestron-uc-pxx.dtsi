@@ -269,10 +269,21 @@
 	 * does: the TAS5825M speaker amplifier and the TLV320AIC3104
 	 * handset and headset codec. Playback channels 1-2 go to I2S0 SDO0,
 	 * channels 3-4 to SDO1. The board file sets the card name (label).
+	 *
+	 * The AIC3104 right line output feeds the hands-free amplifier, which
+	 * is always on. When MCLK stops after a stream with signal, the
+	 * speaker pops, at the stream close and again at the power-down of
+	 * the path. "Playback Hold" is a virtual source that keeps both DACs,
+	 * and the output drivers that they feed, powered while no stream is
+	 * open. So the codec stays at bias on, and it keeps its MCLK (below)
+	 * running.
 	 */
 	sound: sound {
 		compatible = "audio-graph-card2";
 		links = <&i2s0_port>;
+		widgets = "Line", "Playback Hold";
+		routing = "Left DAC", "Playback Hold",
+			  "Right DAC", "Playback Hold";
 
 		multi {
 			#address-cells = <1>;
@@ -575,7 +586,13 @@
 		compatible = "ti,tlv320aic3104";
 		reg = <0x18>;
 		#sound-dai-cells = <0>;
+		/*
+		 * MCLK. The codec keeps it on while it is powered, so it must
+		 * have the rate of the card (256 fs at 48 kHz) from the start.
+		 */
 		clocks = <&cru SCLK_I2S_8CH_OUT>;
+		assigned-clocks = <&cru SCLK_I2S_8CH_OUT>;
+		assigned-clock-rates = <12288000>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&aic3104_pins>;
 		reset-gpios = <&gpio2 RK_PA3 GPIO_ACTIVE_LOW>;
