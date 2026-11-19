@@ -28,6 +28,7 @@
  *  snd_soc_dapm_disable_pin(codec, "MONO_LOUT"), etc.
  */
 
+#include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <linux/init.h>
@@ -74,6 +75,7 @@ struct aic3x_priv {
 	struct regulator_bulk_data supplies[AIC3X_NUM_SUPPLIES];
 	struct aic3x_disable_nb disable_nb[AIC3X_NUM_SUPPLIES];
 	struct aic3x_setup_data *setup;
+	struct clk *mclk;
 	unsigned int sysclk;
 	unsigned int dai_fmt;
 	unsigned int tdm_delay;
@@ -1409,6 +1411,14 @@ static int aic3x_set_power(struct snd_soc_component *component, int power)
 					    aic3x->supplies);
 		if (ret)
 			goto out;
+
+		/* MCLK runs for as long as the codec is powered */
+		ret = clk_prepare_enable(aic3x->mclk);
+		if (ret) {
+			regulator_bulk_disable(ARRAY_SIZE(aic3x->supplies),
+					       aic3x->supplies);
+			goto out;
+		}
 		aic3x->power = 1;
 
 		if (aic3x->gpio_reset) {
@@ -1452,6 +1462,7 @@ static int aic3x_set_power(struct snd_soc_component *component, int power)
 		aic3x->power = 0;
 		/* HW writes are needless when bias is off */
 		regcache_cache_only(aic3x->regmap, true);
+		clk_disable_unprepare(aic3x->mclk);
 		ret = regulator_bulk_disable(ARRAY_SIZE(aic3x->supplies),
 					     aic3x->supplies);
 	}
@@ -1836,6 +1847,15 @@ int aic3x_probe(struct device *dev, struct regmap *regmap, kernel_ulong_t driver
 	}
 
 	gpiod_set_consumer_name(aic3x->gpio_reset, "tlv320aic3x reset");
+
+	/*
+	 * The optional MCLK input. Without it in the device tree, the machine
+	 * driver alone controls the clock, as before.
+	 */
+	aic3x->mclk = devm_clk_get_optional(dev, NULL);
+	if (IS_ERR(aic3x->mclk))
+		return dev_err_probe(dev, PTR_ERR(aic3x->mclk),
+				     "Failed to get the MCLK\n");
 
 	for (i = 0; i < ARRAY_SIZE(aic3x->supplies); i++)
 		aic3x->supplies[i].supply = aic3x_supply_names[i];
