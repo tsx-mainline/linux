@@ -273,17 +273,22 @@
 	 * The AIC3104 right line output feeds the hands-free amplifier, which
 	 * is always on. When MCLK stops after a stream with signal, the
 	 * speaker pops, at the stream close and again at the power-down of
-	 * the path. "Playback Hold" is a virtual source that keeps both DACs,
-	 * and the output drivers that they feed, powered while no stream is
-	 * open. So the codec stays at bias on, and it keeps its MCLK (below)
-	 * running.
+	 * the path. "Playback Hold" is a virtual source that keeps the six
+	 * output drivers powered while no stream is open. So the codec stays
+	 * at bias on, and it keeps its MCLK (below) running. The DACs are not
+	 * held: they power up and down with the streams, while MCLK runs.
+	 * With the DACs held as well, the speaker hissed faintly at idle.
 	 */
 	sound: sound {
 		compatible = "audio-graph-card2";
 		links = <&i2s0_port>;
 		widgets = "Line", "Playback Hold";
-		routing = "Left DAC", "Playback Hold",
-			  "Right DAC", "Playback Hold";
+		routing = "Left Line Out", "Playback Hold",
+			  "Right Line Out", "Playback Hold",
+			  "Left HP Out", "Playback Hold",
+			  "Right HP Out", "Playback Hold",
+			  "Left HP Com", "Playback Hold",
+			  "Right HP Com", "Playback Hold";
 
 		multi {
 			#address-cells = <1>;
